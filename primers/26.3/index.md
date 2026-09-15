@@ -66,22 +66,82 @@ Also changes in trim definitions as well
 
 ### Item Quads
 
-TODO
+Items now handle submitting their quads through `ItemQuads`. This functionally is a wrapper around a list of `BakedQuad`s, separating the quads into whether they are solid and translucent in response to the feature phase changes. `ItemQuads#solid` are submitted to the general `SubmitNodeCollection#solid` phase, `ItemQuads#translucent` are submitted to `SubmitNodeCollection#translucentBlocksAndItems`, and if the item has an outline, `ItemQuads#all` are submitted to `SubmitNodeCollection#outline`.
 
-Pulls out transparent quads into their own list
+Creating an `ItemQuads` from a list of `BakedQuad`s can be easily done by calling `ItemQuads#split`:
+
+```java
+// For some List<BakedQuad> quads
+ItemQuads itemQuads = ItemQuads.split(quads);
+
+// For some QuadCollection collection
+ItemQuads itemQuads = ItemQuads.split(collection.getAll());
+```
+
+Given that the quads could be called every frame, the `ItemQuads` should be stored in their used location whenever possible:
+
+```java
+// An example `ItemModel` implementation
+public class ExampleItemModel implements ItemModel {
+
+    private final ItemQuads itemQuads;
+
+    private ExampleItemModel(QuadCollection collection) {
+        // Store the item quads
+        this.itemQuads = ItemQuads.split(collection.getAll());
+
+        // ...
+    }
+
+    @Override
+    public void update(ItemStackRenderState output, ItemStack item, ItemModelResolver resolver, ItemDisplayContext displayContext, @Nullable ClientLevel level, @Nullable ItemOwner owner, int seed) {
+        output.appendModelIdentityElement(this);
+        ItemStackRenderState.LayerRenderState layer = output.newLayer();
+
+        // ...
+
+        // Set the quads on the layer
+        layer.setQuads(this.itemQuads);
+
+        // ...
+    }
+
+    // ...
+}
+```
 
 ### Submitting Crumbling Overlays
 
-TODO
+The `ModelFeatureRenderer$CrumblingOverlay` applied to entity models (e.g., banners, chests, etc.) are now passed to `OrderedSubmitNodeCollector#submitCrumblingOverlay` for rendering. As such, `submitModel` and `submitModelPart` no longer take in the crumbling overlay.
 
-Separated for entity models
+`OrderedSubmitNodeCollector#submitCrumblingOverlay` takes in the same fields as `submitModel` and `submitModelPart` aside from the `TextureAtlasSprite` and the outline color:
 
+```java
+// For some `OrderedSubmitNodeCollector` collector
+collector.submitCrumblingOverlay(
+    // The entity model to render.
+    model,
+    // The render state extracted from the associated entity.
+    state,
+    // The pose stack.
+    poseStack,
+    // The render type. This should be what was used to render
+    // the actual entity model.
+    renderType,
+    // The light coordinates. This should normally be obtained
+    // from the submission context.
+    LightCoordsUtil.FULL_BRIGHT,
+    // The overlay coordinates. This should normally be obtained
+    // from the submission context.
+    OverlayTexture.NO_OVERLAY,
+    // The tint color to apply to the texture.
+    -1,
+    // The crumbling overlay of how much progress has been made.
+    crumblingOverlay
+);
+```
 
-### Item Activations
-
-TODO
-
-For totem animation, but could be repurposed
+Like before, the passed in `RenderType` is only used to check whether it `RenderType#affectsCrumbling`, which must be `true` for the overlay to be submitted; and if the `RenderType#hasBlending`, which submits to the `SubmitNodeCollection#breakingOverlay` phase if `true`, and the `SubmitNodeCollection#solid` phase if `false`. The actual `RenderType` submitted is pulled from `ModelBakery#DESTROY_TYPES` (or `DESTROY_TYPES_OIT` if improved transparency is enabled) using the progress display.
 
 - `assets/minecraft/atlases/armor_trims.json` is removed
 - `assets/minecraft/models/block/template_farmland.json` -> `template_cube_bottom_top_indented.json`, not one-to-one
@@ -1081,12 +1141,20 @@ public record ExampleTriggerInstance(Optional<Holder<LootItemCondition>> player)
 }
 ```
 
+### Registering `ContextKeySet`s for Some Reason
+
+With the transition to reloadable registries, A new registry has been added for `ContextKeySet`s used by the loot table. These are still defined in `LootContextParamSets`, meaning that the behavior remains almost identical. However, it now validates that all `ContextKey`s (e.g. the ones defined in `LootContextParams`) are added as required keys within `LootContextParamSets#ALL_PARAMS`.
+
+While this makes it more difficult to add custom `ContextKey`s within a new loot `ContextKeySet`, this validation only occurs once when `Bootstrap#bootStrap` is called. Still, due to validation, it is highly recommended to both inject into `LootContextParamSets#ALL_PARAMS` your custom `ContextKey` before registering your specific loot `ContextKeySet`.
+
+
 ### New Loot Data Types
 
-TODO
+With the new reloadable registries also comes associated `LootDataType`s for `SlotSource` (`LootDataType#SLOT_SOURCE`), `ContextFloatProvider` (`LootDataType#FLOAT_PROVIDER`), and `ContextIntProvider` (`LootDataType#INT_PROVIDER`).
 
-Slot source, float/int providers
-Validation handling
+As a refresher, `LootDataType`s are typically used for validation and context tracking. All loot data is validated after registration, checking for any non-obvious issues like recursion or parameters not specified in the used `ContextKeySet`. Then, when generating the loot, elements are tracked by visitation using `LootContext#pushVisitedElement` and `LootContext#popVisitedElement` to ensure that an element is only visited once and is not recursing on itself.
+
+Of these, all three new data types validate against `LootContextParamSets#ALL_PARAMS`. However, only `LootDataType#SLOT_SOURCE` is tracked for visitation when running the `/item` commands. 
 
 ### Reorganizing Pool Containers
 
@@ -1142,9 +1210,18 @@ Speed multiplier mention
 
 ### Villager Food Component
 
-TODO
+Villager food is now stored as a data component via `DataComponents#VILLAGER_FOOD`, replacing `Villager#FOOD_POINTS`. The associated `VillagerFood` object only stores one positive `int`, representing the nutrition value of the food. Vanilla typically uses `1` for this value, with bread being the only item that provides `4` nutrition. For reference, villagers want more food if they have less than `12` nutrition, and are considered to have too much food if they have more than `24` nutrition.
 
-Nutrition, which affects whether they want more food
+The component can be added through `Item$Properties#villagerFood`, or directly through `Item$Properties#component`:
+
+```java
+// For some `Item`.
+new Item(
+    new Item.Properties()
+        // How much nutrition the food should give to the villager.
+        .villagerFood(1)
+)
+```
 
 ### Compostable Copmonent
 
@@ -1164,23 +1241,294 @@ Target specific entities
 
 ### Mob Spawn Settings Environment Attribute
 
-TODO
+`MobSpawnSettings` have been moved off the `Biome` and are now an `EnvironmentAttribute` instead using `EnvironmentAttributes#NATURAL_MOB_SPAWNS`. As a positional attribute, they can be defined on the `DimensionType`, `Biome`, or within a `Timeline`.
 
-As the name implies
+```json5
+// Dimension type example.
+{
+    "attributes": {
+        "minecraft:gameplay/natural_mob_spawns": {
+            // Data has not changed from previous version.
+            "spawn_costs": {
+                // ... 
+            },
+            "spawns_by_category": {
+                // ...
+            }
+        }
+    }
+    // ...
+}
+
+// Biome example.
+{
+    "attributes": {
+        "minecraft:gameplay/natural_mob_spawns": {
+            "argument": {
+                // Data has not changed from previous version.
+                "spawn_costs": {
+                    // ... 
+                },
+                "spawns_by_category": {
+                    // ...
+                }
+            },
+            // This is the modifier to use for spawns.
+            // The quirks of this modifier are explained below.
+            "modifier": "overlay"
+        }
+    }
+    // ...
+}
+
+// Timeline example.
+{
+    "tracks": {
+        "minecraft:gameplay/natural_mob_spawns": {
+            "keyframes": [
+                {
+                    "ticks": 0,
+                    "value": {
+                        // Data has not changed from previous version.
+                        "spawn_costs": {
+                            // ... 
+                        },
+                        "spawns_by_category": {
+                            // ...
+                        }
+                    }
+                },
+                {
+                    "ticks": 1000,
+                    "value": {
+                        // Data has not changed from previous version.
+                        "spawn_costs": {
+                            // ... 
+                        },
+                        "spawns_by_category": {
+                            // ...
+                        }
+                    }
+                }
+            ],
+            // This is the modifier to use for spawns.
+            // The quirks of this modifier are explained below.
+            "modifier": "overlay"
+        }
+    }
+    // ...
+}
+```
+
+When layering spawn settings, they can either be overridden via `AttributeModifier$OperationId#OVERRIDE` (timeline versions take precedence, followed by biome, then dimension), or overlayed via `OVERLAY`: a new modifier operation added in this version. As the name implies, overlay acts as a layering system, where the data is merged together. If the data uses an object that stores data with some kind of key system, then the latter layer's value will override the former.
+
+The overlay for `MobSpawnSettings` works similarly, though there are a few quirks. To review, `MobSpawnSettings` stores two maps: one for entity spawns, where the key is the `MobCategory` and the value is a `WeightedList` containing the spawned entities; and one for the mop costs, where the key is the `EntityType` and the value is the `MobSpawnSettings$MobSpawnCost`.
+
+Now imagine we are trying to overlay two spawn settings that look like so:
+
+```json5
+// The former spawn settings.
+{
+    "spawns_by_category": {},
+    "spawn_costs": {}
+}
+
+// The latter spawn settings.
+{
+    "spawns_by_category": {
+        "creature": [
+            {
+                "type": "minecraft:pig",
+                "count": 8,
+                "weight": 1
+            }
+        ]
+    },
+    "spawn_costs": {}
+}
+```
+
+First, the overlay modifier checks whether both `spawns_by_category` and `spawn_costs` are empty, like in the former settings. If so, then the other settings will be used, in this case, the latter. The same would be true if the latter was empty, then the former will be picked.
+
+Now, let's update the settings so that neither are completely empty:
+
+```json5
+// The former spawn settings.
+{
+    "spawns_by_category": {
+        "creature": [
+            {
+                "type": "minecraft:sheep",
+                "count": 4,
+                "weight": 1
+            }
+        ]
+    },
+    "spawn_costs": {}
+}
+
+// The latter spawn settings.
+{
+    "spawns_by_category": {
+        "creature": [
+            {
+                "type": "minecraft:pig",
+                "count": 8,
+                "weight": 1
+            }
+        ]
+    },
+    "spawn_costs": {}
+}
+```
+
+Now, the overlay modifier will check whether both settings have the same keys in `spawns_by_category` and `spawn_costs`. If they do, then the latter settings will be used. In our case, both settings specify the `creature` category and have no keys in `spawn_costs`, meaning the former is discarded and the latter is used. Meaning, our final mob settings will look like so:
+
+```json5
+// This is the latter settings.
+// The former settings were discarded since they
+// both defined the same mob categories and spawn costs.
+{
+    "spawns_by_category": {
+        "creature": [
+            {
+                "type": "minecraft:pig",
+                "count": 8,
+                "weight": 1
+            }
+        ]
+    },
+    "spawn_costs": {}
+}
+```
+
+So, let's modify our settings one last time so that they can be merged together for the final step:
+
+```json5
+// The former spawn settings.
+{
+    "spawns_by_category": {
+        "creature": [
+            {
+                "type": "minecraft:sheep",
+                "count": 4,
+                "weight": 1
+            }
+        ],
+        "ambient": [
+            {
+                "type": "minecraft:bat",
+                "count": 8,
+                "weight": 1
+            }
+        ]
+    },
+    "spawn_costs": {
+        "minecraft:sheep": {
+            "charge": 0.0001,
+            "energy_budget": 10000
+        },
+        "minecraft:bat": {
+            "charge": 0.0001,
+            "energy_budget": 10000
+        }
+    }
+}
+
+// The latter spawn settings.
+{
+    "spawns_by_category": {
+        "creature": [
+            {
+                "type": "minecraft:pig",
+                "count": 8,
+                "weight": 1
+            }
+        ]
+    },
+    "spawn_costs": {
+        "minecraft:pig": {
+            "charge": 0.0001,
+            "energy_budget": 10000
+        },
+        "minecraft:bat": {
+            "charge": 0.05,
+            "energy_budget": 20
+        },
+    }
+}
+```
+
+The settings are merged together in two steps. For `spawns_by_category`, it loops through all available `MobCategory`s. If both setting specify the same category, then only the latter is used. Otherwise, it will use whatever category is not empty. As for `spawn_costs`, the former settings are added first, followed by the latter settings, replacing any defined in the former.
+
+That means, for our example, it will look like so:
+
+```json5
+// The merged spawn settings.
+{
+    "spawns_by_category": {
+        // Uses the creature data defined by
+        // the latter settings, replacing the former.
+        "creature": [
+            {
+                "type": "minecraft:pig",
+                "count": 8,
+                "weight": 1
+            }
+        ],
+        // Uses the former settings data since
+        // the latter didn't define any ambient spawns.
+        "ambient": [
+            {
+                "type": "minecraft:bat",
+                "count": 8,
+                "weight": 1
+            }
+        ]
+    },
+    "spawn_costs": {
+        // Bat costs were replaced with the latter.
+        "minecraft:bat": {
+            "charge": 0.05,
+            "energy_budget": 20
+        },
+        // Defined by the latter.
+        "minecraft:pig": {
+            "charge": 0.0001,
+            "energy_budget": 10000
+        },
+        // Defined by the former.
+        "minecraft:sheep": {
+            "charge": 0.0001,
+            "energy_budget": 10000
+        }
+    }
+}
+```
+
+Note that sheeps no longer spawn, even though their costs still remain. This is a side effect of the overlay method, as it assumes that replacing any category means you intend to define what mobs spawn there altogether, rather than a partial merge.
 
 ### The Death of the Unused Block Types
 
-TODO
+The block type `MapCodec` registry, and subsequently `Block#codec`, have been completely removed. As such, any `codec` overrides or direct `MapCodec`s should be deleted as well:
 
-It's just gone now
+```diff
+// For some block.
+public class ExampleBlock extends Block {
+-    public static final MapCodec<ExampleBlock> CODEC = BlockBehaviour.simpleCodec(ExampleBlock::new);
 
-### Registering `ContextKeySet`s for Some Reason
+    public ExampleBlock(BlockBehaviour.Properties properties) {
+        super(properties);
+    }
 
-TODO
+-    @Override
+-    public MapCodec<? extends Block> codec() {
+-        return CODEC;
+-    }
 
-The `LootContextParamSets` are now a registry
-But they still validate that any params are in all params?
-Why not make that a registry then?
+    // ...
+}
+```
 
 ### Simplifying Types to Codecs
 
