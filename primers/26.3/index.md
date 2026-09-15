@@ -14,14 +14,6 @@ There are a number of user-facing changes that are part of vanilla which are not
 
 TODO
 
-### Paletted Permutations Rewrite
-
-TODO
-
-### Shader Extensions and Layouts
-
-TODO
-
 ### LWJGL with SDL
 
 TODO
@@ -33,17 +25,63 @@ Text Input focusing through `TextInputManager`
 
 TODO
 
+Mention the changing names for the backends and frontends and api
+spv compilation then converted to glsl or kept for vulkan
+
+### Shader Extensions and Layouts
+
+TODO
+
+As the name implies, more syntax
+
 ### Order Independent Transparency (OIT)
 
 TODO
+
+New pipeline handler for transparency
+Split into depth bounds, transmittance, and accumulate (likely using [moment-based OIT](https://momentsingraphics.de/Media/I3D2018/Muenstermann2018-MBOIT.pdf))
+
+### No More Texture Override Shenanigans
+
+TODO
+
+`RenderSystem#outputColorTextureOverride`, `outputDepthTextureOverride` fully removed
+Rendering a pass should be fully encompassed in the pass
+Feature dispatch inside render pass after binding uniforms
+`PreparedRenderType#drawFromBuffer` is now called within a render pass
+
+### Feature Phase Changes
+
+TODO
+
+Phases are reorganized
+Gizmos, translucents, tags are shuffled around
+
+### Paletted Permutations Update
+
+TODO
+
+PNG metadata for this
+Also changes in trim definitions as well
+
+### Item Quads
+
+TODO
+
+Pulls out transparent quads into their own list
 
 ### Submitting Crumbling Overlays
 
 TODO
 
-### Palette Metadata
+Separated for entity models
+
+
+### Item Activations
 
 TODO
+
+For totem animation, but could be repurposed
 
 - `assets/minecraft/atlases/armor_trims.json` is removed
 - `assets/minecraft/models/block/template_farmland.json` -> `template_cube_bottom_top_indented.json`, not one-to-one
@@ -861,19 +899,339 @@ TODO
 
 ## Registries and Data Components
 
-TODO
+Many different registries and data components have been rewritten in a variety of different methods. As they are so intertwined, they have combine them all into one mega section, similarly to the usual client updates.
+
+### Reloadable Datapack Registries
+
+A new layer has been introduced into the datapack registry process that allows for some datapack registries to be marked as reloadable (can be reloaded via `/reload` command). As such, `LootTable`s, `LootItemCondition`s, `ContextFloatProvider`s, `ContextIntProvider`s, `LootItemFunction`s, `SlotSource`s, `Advancement`s, and `Recipe`s are now datapack registries. Adding a new reloadable datapack registry requires adding to the `RegistryDataLoader#RELOADABLE_REGISTRIES` list.
+
+With this change comes many other changes, especially for data generation and implementation details, which have their own sections below. However, the general gist is that most `ResourceKey` or direct value references have been replaced with either a `Holder`-wrapped, or `HolderSet`-wrapped registry object. Which is chosen depends entirely on the specific use case.
+
+### Registry Bootstrap "Providers"
+
+Since data generation for datapack registry entries are handled through `RegistriesDatapackGenerator`, reloadable registries now no longer have their own `DataProvider`s. Instead, the provider classes now implements either `SingleRegistryBootstrap` or `MultiRegistryBootstrap` to 'provide' their entries.
+
+`SingleRegistryBootstrap`, previously `RegistrySetBuilder$RegistryBootstrap`, is the familiar consumer that takes in a `BootstrapContext` to register entries to. Both `LootTableProvider` and `AdvancementProvider` now implement `SingleRegistryBootstrap`, setting the generic to the registry object type.
+
+This means that their underlying implementations are completely different.
+
+`AdvancementProvider` now takes in a list of `AdvancementSubProvider$Factory`s, which construct the `AdvancementSubProvider` with the `BootstrapContext` supplied to the main provider. `AdvancementSubProvider` is now an abstract class as well, taking in the `BootstrapContext` to be used as part of the no argument `generate` method. If another advancement needs to be referenced for a parent, only the `Identifier` is now required.
+
+```java
+public class ExampleAdvancementSubProvider extends AdvancementSubProvider {
+
+    // The constructor with the bootstrap context
+    public ExampleAdvancementSubProvider(BootstrapContext<Advancement> output) {
+        super(output);
+    }
+
+    @Override
+    public void generate() {
+        // The output can be obtained via `this.output`.
+        // Additionally, `AdvancementSubProvider` already provides fielded
+        // access to the damage types registry via `this.damageTypes`.
+        Holder.Reference<Advancement> example = Advancement.Builder.advancement()
+            // Set a parent to another advancement.
+            .parent(Identifier.withDefaultNamespace("adventure/sleep_in_bed"))
+            // Add whatever other information.
+            // Register the advancement for generation.
+            .save(this.output, "examplemod:example_advancement");
+    }
+}
+
+// For some RegistrySetBuilder registry passed to a `RegistriesDatapackGenerator`:
+registry.add(
+    Registries.ADVANCEMENT,
+    // The advancement provider to register.
+    new AdvancementProvider(
+        // The list of sub providers to generate.
+        List.of(
+            ExampleAdvancementSubProvider::new
+        )
+    )
+);
+```
+
+`LootTableProvider` and its associated `LootTableSubProvider` are in a slightly different situation. Most of the implementation logic is quite similar in nature, with the main difference being some minor changes to the underlying interfaces. If you are not implementing your own custom provider methods, then you will likely only have to change the constructor and provider addition.
+
+If you are, here are the main points. `LootTableProvider$SubProviderEntry` now takes in a `LootTableSubProvider$Factory` similar to the advancement provider, except that this factory takes in a `LootTableSubProvider$Context`. This is a wrapper around the `BootstrapContext<LootTable>` meant to set the random sequence and param set for you. Meanwhile, `LootTableSubProvider` replaces `generate` with a no argument `run`. Instead you are supposed to store the `LootTableSubProvider$Context` and call` accept`, similar to how the output consumer from `generate` was handled.
+
+```java
+public class ExampleLootSubProvider implements LootTableSubProvider {
+    protected final LootTableSubProvider.Context output;
+
+    public ExampleLootSubProvider(LootTableSubProvider.Context output) {
+        // Store the output
+        this.output = output;
+    }
+
+    @Override
+    public void run() {
+        // Write the loot table.
+        this.output.accept(
+            // The registry key for the table.
+            ResourceKey.create(Registries.LOOT_TABLE, Identifier.fromNamespaceAndPath("examplemod", "example_table")),
+            // A builder for the loot table.
+            // Call whatever methods desired to add pools, conditions, etc.
+            LootTable.lootTable()
+        );
+    }
+}
+```
+
+`BlockLootSubProvider` and `EntityLootSubProvider` are similar, except they take in the `LootTableSubProvider$Context` instead of the `HolderLookup$Provider`. They each provide the common `HolderGetter`s that is used to get the objects. The main difference is that some elements replace the `LootItemCondition$Builder` with a `Holder<LootItemCondition>` depending on if the condition is now datapack registered instead of inlined. But otherwise, they are functionally the same.
+
+```java
+public class ExampleBlockLoot extends BlockLootSubProvider {
+
+    public ExampleBlockLoot(LootTableSubProvider.Context output) {
+        super(
+            // Items that are explosion resistant.
+            Set.of(),
+            // The feature flags to check for generation.
+            FeatureFlags.REGISTRY.allFlags(),
+            // The passed in context.
+            output
+        );
+    }
+
+    @Override
+    protected void generate() {
+        // More or less same as prior versions.
+    }
+}
+```
+
+Then, all you need to do is add them to the provider with the desired `ContextKeySet`:
+
+```java
+// For some RegistrySetBuilder registry passed to a `RegistriesDatapackGenerator`:
+registry.add(
+    Registries.LOOT_TABLE,
+    // The loot table provider to register.
+    new LootTableProvider(
+        // The built in loot tables to check for.
+        Set.of()
+        // The list of sub providers to generate.
+        List.of(
+            new LootTableProvider.SubProviderEntry(ExampleLootSubProvider::new, LootContextParamSets.SELECTOR),
+            new LootTableProvider.SubProviderEntry(ExampleBlockLoot::new, LootContextParamSets.BLOCK)
+        )
+    )
+);
+```
+
+One caveat is that validation is no longer handled in the provider itself. Rather it is checked when constructing the reloadable lookup through `VanillaRegistries#validateLootData`. Depending on the circularness of your registry entries (e.g. referring to other loot tables in loot tables), you may want to perform a similar validation, which will likely have to be wrapped or injected in somehow.
+
+`MultiRegistryBootstrap` handles generating registry entries for multiple registries in the same provider. The registries it generates for are requested in `requestedRegistries` via their `ResourceKey`s. Then `run` is used to get the `BootstrapContext`s required for registration.
+
+This is currently only used by `RecipeProvider` since it generates both recipes and their associated advancements at the same time. Given the bootstrap nature, `RecipeProvider$Runner` is removed. Instead, we create our own `MultiRegistryBootstrap` to handle the recipe building.
+
+`RecipeProvider` now takes in the `BoostrapContext`s for the recipe and advancement registries. The `RecipeOutput` is created within the construtor, acting as our `BootstrapContextAccess` to get any other required registries. Actually generating the recipes is more or less the same: override `buildRecipes` and call `RecipeOutput#accept` with the recipe to register, or more commonly using `RecipeBuilder#save`. The `MultiRegistryBootstrap` can be created as an anonymous class where `RecipeProvider#buildRecipes` is called within `run`:
+
+```java
+public class ExampleRecipeProvider extends RecipeProvider {
+
+    // The constructors with the desired outputs.
+    public ExampleRecipeProvider(BootstrapContext<Recipe<?>> recipeOutput, BootstrapContext<Advancement> advancementOutput) {
+        super(recipeOutput, advancementOutput);
+    }
+
+    @Override
+    protected void buildRecipes() {
+        // Call whatever methods to generate the recipes.
+    }
+
+    // ...
+
+    // Construct the registry bootstrap.
+    public static MultiRegistryBootstrap create() {
+        return new MultiRegistryBootstrap() {
+            @Override
+            public Set<ResourceKey<? extends Registry<?>>> requestedRegistries() {
+                // Return the registries we are adding entries to.
+                return Set.of(Registries.RECIPE, Registries.ADVANCEMENT);
+            }
+
+            @Override
+            public void run(MultiRegistryBootstrap.BootstrapGetter registries) {
+                // Run the recipe provider.
+                new ExampleRecipeProvider(registries.get(Registries.RECIPE), registries.get(Registries.ADVANCEMENT)).buildRecipes();
+            }
+        };
+    }
+}
+
+// For some RegistrySetBuilder registry passed to a `RegistriesDatapackGenerator`:
+registry.add(
+    Registries.RECIPE,
+    // The bootstrap to register.
+    ExampleRecipeProvider.create()
+);
+```
 
 ### Removal of `ContextAwarePredicate`
 
+`ContextAwarePredicate` was originally a wrapper around a list of `LootItemCondition`s for use in advancement criteria triggers. Now, `ContextAwarePredicate` has been completely removed, replaced by the `Holder<LootItemCondition>`:
+
+```java
+// For some trigger implementation
+public record ExampleTriggerInstance(Optional<Holder<LootItemCondition>> player) implements SimpleCriterionTrigger.SimpleInstance {
+    // ...
+}
+```
+
+### New Loot Data Types
+
 TODO
 
-### Brewing Recipes
+Slot source, float/int providers
+Validation handling
+
+### Reorganizing Pool Containers
 
 TODO
+
+Removal of `LootPoolSingletonContainer`
+Replaced by `UniformContainerBase`, `SingleEntryContainerBase`, `ExpandableContainerBase`
+
+### Loot Conditions and Functions: Tweaks and Registrations
+
+TODO
+
+Minor changes with the conditions and functions
+Basically, just passing around one that's compiled together
+Allow for holder inputs
+Registering some entries depending on common usage (e.g. silk touch)
+
+### Registered Slot Sources
+
+TODO
+
+Yep, they're also registered now
+
+### Splitting Numbers into Floats and Ints
+
+TODO
+
+`NumberProvider` split into `ContextIntProvider`, `ContextFloatProvider`
+Mostly the same implementations
+Resolvable stuff for data components
+
+### Datapack Brewing Recipes
+
+TODO
+
+Brewing recipe - why do this way
+Brewing fuel component
+Speed multiplier mention
 
 ### Block Transformers
 
 TODO
+
+Right click interact, replaces axe, hoe, shovel behavior
+Those associated classes removed
+Also a datapack registry
+
+### Cooking Fuel Component
+
+TODO
+
+Speed multiplier mention
+
+### Villager Food Component
+
+TODO
+
+Nutrition, which affects whether they want more food
+
+### Compostable Copmonent
+
+TODO
+
+How many layers to add
+Clamps between 0 and 7 after adding
+Can technically be negative for reasons
+
+### Hiding Amongst the Mobs: A Data Component
+
+TODO
+
+Holding an item will multiply the visibility by a set amount
+Apparently, you can be 1000% visible because visibility affects the range of notice
+Target specific entities
+
+### Mob Spawn Settings Environment Attribute
+
+TODO
+
+As the name implies
+
+### The Death of the Unused Block Types
+
+TODO
+
+It's just gone now
+
+### Registering `ContextKeySet`s for Some Reason
+
+TODO
+
+The `LootContextParamSets` are now a registry
+But they still validate that any params are in all params?
+Why not make that a registry then?
+
+### Simplifying Types to Codecs
+
+TODO
+
+Remove type classes for blockstateprovider, structureplacement, and placementmodifier
+
+### Configuring Features without `ConfiguredFeature`s
+
+TODO
+
+Feature system reimplementation
+Feature is now an interface of which the configured part is just the implementation
+Placed feature more or less the same
+Placement modifier tweaks
+
+### Configured Carvers without `ConfiguredWorldCarver`
+
+TODO
+
+Pretty much the same as features
+
+### Rewriting Density Functions
+
+TODO
+
+Splitting function into function and compiled sampler
+dfrewriterule for optimization
+Usage more or less the same
+
+### Not a Surface, but a Material
+
+TODO
+
+Renaming surface to material
+More of a direct correlation since there was already a difference between rule source and the evaluated rule
+
+### More Template Rule Tests!
+
+TODO
+
+AND, OR, NOT rule tests for the template predicates
+
+### Noisy Musical Chairs
+
+TODO
+
+The noise classes have functionally consumed each other with some classes taking the place of other classes
+It might be better to consider them all something to review
+NoiseParameters -> NormalNoise
+NormalNoise -> Noise
 
 - `net.minecraft.advancements`
     - `Advancement$Builder#display` -> `rootDisplay`, `Identifier` can no longer be null
@@ -2307,7 +2665,7 @@ TODO
     - `Sum` -> `.floats.Sum`, `.ints.Sum`; now implements `AggregateProvider`
     - `UnaryProvider` - A provider that operates upon itself.
     - `UniformGenerator` -> `.floats.UniformGenerator`, `.ints.UniformGenerator`; now implements `RangeProvider`
-- `net.minecraft.world.level.straoge.loot.providers.number.{floats, ints}` (Indicates there is both a float and int provider variant)
+- `net.minecraft.world.level.storage.loot.providers.number.{floats, ints}` (Indicates there is both a float and int provider variant)
     - `Absolute` - Takes the absolute value of the sampled provider.
     - `Average` - Takes the average of all sampled providers.
     - `ConditionalValue` - Uses the true provider if the `LootItemCondition` returns `true`, otherwise uses the false provider.
@@ -2321,7 +2679,7 @@ TODO
     - `Product` - Multiplies all sampled providers together.
     - `Quotient` - Divides the sampled left provider by the sampled right provider.
     - `WeightedListValue` - Picks a random weighted provider.
-- `net.minecraft.world.level.straoge.loot.providers.number.floats`
+- `net.minecraft.world.level.storage.loot.providers.number.floats`
     - `Ceiling` - Ceils the sampled `float`.
     - `ContextFloatProvider` - Provides a `float` value given the `LootContext`.
     - `ContextFloatProviders` - All vanilla reference registered `float` providers. Most providers are inlined in the loot table.
@@ -2335,7 +2693,7 @@ TODO
     - `Sine` - Takes the sine of the sampled `float`.
     - `SquareRoot` - Takes the square root of the sampled `float`.
     - `Truncate` - Truncates the `float` to the `int` closest to 0.
-- `net.minecraft.world.level.straoge.loot.providers.number.ints`
+- `net.minecraft.world.level.storage.loot.providers.number.ints`
     - `ContextIntProvider` - Provides an `int` value given the `LootContext`.
     - `ContextIntProviders` - All vanilla reference registered `float` providers. Most providers are inlined in the loot table.
     - `ContextIntProviderTypes` - All registered `int` provider types.
@@ -2344,15 +2702,116 @@ TODO
     - `FromFloat` - Converts a sampled `float` to an `int`.
     - `ResolvableInt` - A lazy supplied reference to a constant or `ResourceKey<ContextIntProvider>`. This is for use outside the datapack context, like data components.
 
-WAITING: For deompile
-
 ## Minor Migrations
 
 The following is a list of useful or interesting additions, changes, and removals that do not deserve their own section in the primer.
 
 ### Command Responses
 
-TODO
+`CommandResponseTracker` is a method of handling the response to send during a command, tracking how many times a given element was successfully handled. The tracker can be broken into three parts: creating the tracker, tracking what values are returned by the command, and sending the feedback message based on the result.
+
+The tracker is created by calling `CommandResponseTracker#create`, specifying the generic of the object being tracked:
+
+```java
+// In some command method
+private static int exampleCommandMethod(CommandSourceStack source, Collection<? extends Entity> entities) throws CommandSyntaxException {
+    // We are tracking entities in our command
+    CommandResponseTracker<Entity> tracker = CommandResponseTracker.create();
+
+    // ...
+}
+```
+
+Then, `CommandResponseTracker#track` is used to keep track of the specific count we care about. The amount counted is either 1 if only the element is passed in, a 1 or 0 if a `boolean` is provided, or the raw count `int`:
+
+```java
+// In some command method.
+private static int exampleCommandMethod(CommandSourceStack source, Collection<? extends Entity> entities) throws CommandSyntaxException {
+    // ...
+
+    for (Entity entity : entities) {
+        // Tracking whether the entity has a glowing tag.
+        // 1 if yes, 0 is no.
+        tracker.track(entity, entity.hasGlowingTag);
+    }
+}
+```
+
+Finally, to determine what message to display to get, we call `CommandResponseTracker#sendFeedback`, providing the `CommandSourceStack`, a `boolean` for whether the message should broadcast to the admins, and the messages to display depending on the scenario.
+
+The messages are constructed using a `CommandResponseTracker$Messages`, `$MessagesWithArg`, or `MessagesWithArgs`, each taking zero, one, or two additional arguments, respectively, to pass to the message. They are constructed via `CommandResponseTracker#messages`, taking in an optional error handler to throw, a message if one object was successfully handled, and a general message if multiple objects were successfully handled:
+
+```java
+// In the same location as the command method.
+// The first argument should match the generic of the tracker.
+// The other arguments are arbitrary depending on use case.
+private static final CommandResponseTracker.MessagesWithArg<Entity, Integer> RESPONSE_EXAMPLE = CommandResponseTracker.messages(
+    // The error to throw on failure.
+    // This is optional, if none is specified, then no error will ever be thrown.
+    // Can either be a `SimpleCommandExceptionType`, or some function that takes in the argument and returns a `CommandSyntaxException`.
+    new SimpleCommandExceptionType(Component.translatable("commands.examplemod.example.failed")),
+    // The message to display on single success.
+    // This takes in the object generic, the total value tracked (what's returned to the command), and any additional arguments used.
+    // It returns the message to display.
+    (entity, totalValue, arg) -> Component.translatable("commands.examplemod.example.success.single", entity.getDisplayName(), totalValue, arg),
+    // The message to display on multiple success.
+    // This takes in the total number of objects tracked, the total value tracked (what's returned to the command), and any additional arguments used.
+    // It returns the message to display.
+    (entityCount, totalValue, arg) -> Component.translatable("commands.examplemod.example.success.multiple", entityCount, totalValue, arg)
+);
+
+// In some command method.
+private static int exampleCommandMethod(CommandSourceStack source, Collection<? extends Entity> entities) throws CommandSyntaxException {
+    // ...
+
+    // Returned the tracked total value
+    return tracker.sendFeedback(
+        // The command source stack.
+        source,
+        // Whether to broadcast the message to the admins.
+        true,
+        // What entity to provide during a single success.
+        // This is either:
+        // - `ANY`, which chooses the first tracked entity.
+        // - `NON_ZERO`, which chooses the first tracked entity that provides a non-zero value.
+        // If not specified, it defaults to `NON_ZERO`
+        CommandResponseTracker.ElementType.NON_ZERO,
+        // The response messages to choose from.
+        RESPONSE_EXAMPLE,
+        // Any additional arguments passed to the message handler.
+        42
+    );
+}
+```
+
+If `sendFeedback` is too limiting, you can determine what to do by calling `dispatch` instead:
+
+```java
+// In some command method.
+private static int exampleCommandMethod(CommandSourceStack source, Collection<? extends Entity> entities) throws CommandSyntaxException {
+    // ...
+
+    boolean success = tracker.dispatch(
+        // What entity to provide during a single success.
+        // This is either:
+        // - `ANY`, which chooses the first tracked entity.
+        // - `NON_ZERO`, which chooses the first tracked entity that provides a non-zero value.
+        CommandResponseTracker.ElementType.NON_ZERO,
+        // The handler for what to do
+        // Either a `CommandResponseTracker$Dispatch`, `$DispatchWithArg`, or `$DispatchWithArgs`
+        new CommandResponseTracker.DispatchWithArg<>(
+            // If there is one match.
+            // This takes in the object generic, the total value tracked (what's returned to the command), and any additional arguments used.
+            (entity, totalValue, arg) -> true,
+            // If there are no or multiple matches.
+            // This takes in the total number of objects tracked, the total value tracked (what's returned to the command), and any additional arguments used.
+            (entityCount, totalValue, arg) -> false
+        ),
+        // Any additional arguments passed to the message handler.
+        42
+    );
+}
+```
 
 - `net.minecraft.server.commands`
     - `ArgProvider` - Provides an argument mapping to a specific object.
@@ -2360,7 +2819,80 @@ TODO
 
 ### Conversion Tracker
 
-TODO
+`ConversionTracker` is a method of handling the conversions of mob from one form to another (e.g. zombie -> drowned, skeleton -> stray), as long as they are entities of the same type. It takes in the entity information along with any necessary storage and values, and manages the behavior until the entity is converted sucessfully, or is reset.
+
+The tracker is typically added as an instance field on the entity itself, then hooked in via `tick`, `addAdditionalSaveData`, and `readAdditionalSaveData`:
+
+```java
+// Within some Mob subtype
+// Assume we have ExampleEntity extends Mob
+// And another ExampleSubEntity extends ExampleEntity
+public class ExampleEntity extends Mob {
+    // For syncing that the entity is being converted.
+    private static final EntityDataAccessor<Boolean> SUB_CONVERSION_ID = SynchedEntityData.defineId(ExampleEntity.class, EntityDataSerializers.BOOLEAN);
+
+    private final ConversionTracker<ExampleEntity> subTracker = new ConversionTracker<>(
+        // The mob being converted.
+        // This is used to handle everything related to setting and checking any mob data,
+        // and eventually calling `Mob#convertTo`.
+        this,
+        // The accessor used to sync that the entity is currently being converted.
+        SUB_CONVERSION_ID,
+        // The entity this will become after conversion.
+        () -> EXAMPLE_SUB_ENTITY,
+        // The level event to run on the client on conversion.
+        () -> LevelEvent.SOUND_GHAST_FIREBALL,
+        // The predicate that determines whether the mob can be converted.
+        // This must remain true throughout the entire affliction and conversion process;
+        // otherwise the conversion will fail.
+        this::isAlive,
+        // The tag key used to store the affliction time on the entity when writing to disk.
+        "SubAfflictedTime",
+        // How many ticks the entity needs to be afflicted for before the conversion can start.
+        600, // 30 seconds
+        // The tag key used to store the conversion time on the entity when writing to disk.
+        "SubConversionTime",
+        // How many ticks the entity takes to convert.
+        20, // 1 second
+        // A consumer that is run after the entity has been converted, as a finalization step.
+        (ExampleSubEntity converted, ServerLevel level) -> {
+            
+        }
+    );
+
+    // ...
+
+    @Override
+    protected void defineSynchedData(SynchedEntityData.Builder entityData) {
+        super.defineSynchedData(entityData);
+        // Register the synced data.
+        entityData.define(SUB_CONVERSION_ID, false);
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        // Tick the tracker.
+        this.subTracker.tick();
+    }
+
+    @Override
+    protected void addAdditionalSaveData(ValueOutput output) {
+        super.addAdditionalSaveData(output);
+        // Write our tracker data.
+        this.subTracker.addAdditionalSaveData(output);
+    }
+
+    @Override
+    protected void readAdditionalSaveData(ValueInput input) {
+        super.readAdditionalSaveData(input);
+        // Read the tracker data.
+        this.subTracker.readAdditionalSaveData(input);
+    }
+}
+```
+
+Note that, given the requirement that the converted entity must be a subtype of the converting entity, this has rather limited use cases (it's the reason why zombie villager -> villager does not use the tracker).
 
 - `net.minecraft.world.entity.ConversionTracker` - A tracker for handling a mob turning into another mob.
 - `net.minecraft.world.entity.monster.skeleton.Skeleton`
@@ -3050,5 +3582,3 @@ TODO
     - `MapDecorationType#NO_MAP_COLOR`, `hasMapColor`
     - `MapItemSavedData#isExplorationMap`
 - `net.minecraft.world.phys.Vec3#applyLocalCoordinatesToRotation`, `addLocalCoordinates`
-
-- CONTINUE: `net.minecraft.world.level.levelgen.densityfunction`
