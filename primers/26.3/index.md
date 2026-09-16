@@ -971,7 +971,7 @@ With this change comes many other changes, especially for data generation and im
 
 ### Registry Bootstrap "Providers"
 
-Since data generation for datapack registry entries are handled through `RegistriesDatapackGenerator`, reloadable registries now no longer have their own `DataProvider`s. Instead, the provider classes now implements either `SingleRegistryBootstrap` or `MultiRegistryBootstrap` to 'provide' their entries.
+Since data generation for datapack registry entries are handled through `RegistriesDatapackGenerator`, reloadable registries now no longer have their own `DataProvider`s. Instead, the provider classes now implements either `SingleRegistryBootstrap` or `MultiRegistryBootstrap` to 'provide' their entries to `RegistriesDatapackGenerator#forReloadableLayer`.
 
 `SingleRegistryBootstrap`, previously `RegistrySetBuilder$RegistryBootstrap`, is the familiar consumer that takes in a `BootstrapContext` to register entries to. Both `LootTableProvider` and `AdvancementProvider` now implement `SingleRegistryBootstrap`, setting the generic to the registry object type.
 
@@ -1793,10 +1793,66 @@ Pretty much the same as features
 
 ### Interfacing with `BlockStateProvider`s
 
-TODO
+`BlockStateProvider` is now an interface instead of an abstract class. The only change aside from changing `extends` to `implements` is that `getState` now takes in a `LevelAccessor` instead of a `WorldGenLevel`.
 
-Now an interface from the abstract class
-Just changes many of the implementations to be a record instead of a class
+```java
+// An example block stat provider.
+public record AirProvider() implements BlockStateProvider {
+    public static final AirProvider INSTANCE = new AirProvider();
+    // The map codec used as the registry object.
+    public static final MapCodec<AirProvider> CODEC = MapCodec.unit(INSTANCE);
+
+    @Override
+    public BlockState getState(LevelAccessor level, RandomSource random, BlockPos pos) {
+        // The block to provide.
+        return Blocks.AIR.defaultBlockState();
+    }
+
+    @Override
+    public MapCodec<AirProvider> codec() {
+        // The codec used for serialization.
+        return CODEC;
+    }
+}
+
+// Register the map codec.
+Registry.register(
+    BuiltInRegistries.BLOCK_STATE_PROVIDER_TYPE,
+    Identifier.fromNamespaceAndPath("examplemod", "air"),
+    AirProvider.CODEC
+);
+```
+
+Block state providers can either be inlined or referenced as a world datapack registry (via `Registries#BLOCK_STATE_PROVIDER`) depending on reusability:
+
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+// The resource key to register
+public static final ResourceKey<BlockStateProvider> EXAMPLE_PROVIDER = ResourceKey.create(
+    Registries.BLOCK_STATE_PROVIDER,
+    Identifier.fromNamespaceAndPath("examplemod", "example_provider")
+);
+
+builder.add(Registries.BLOCK_STATE_PROVIDER, bootstrap -> {
+    bootstrap.register(
+        EXAMPLE_PROVIDER,
+        // Our state provider.
+        new AirProvider()
+    );
+});
+```
+
+And the generated JSON:
+
+```json5
+// For some block state provider.
+// In `data/examplemod/worldgen/block_state_provider/example_provider.json`
+{
+    // Our state provider.
+    "type": "examplemod:air"
+}
+```
 
 ### Interfacing with `StructurePlacement`s
 
@@ -1864,7 +1920,7 @@ And the generated JSON:
     // Our structure placement.
     "placement": {
         "type": "examplemod:in_chunk",
-        "pos": [ 1, 1]
+        "pos": [ 1, 1 ]
     },
     "structures": [
         // ...
