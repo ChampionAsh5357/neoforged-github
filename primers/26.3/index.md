@@ -6,13 +6,15 @@ This primer is licensed under the [Creative Commons Attribution 4.0 Internationa
 
 If there's any incorrect or missing information, please file an issue on this repository or ping @ChampionAsh5357 in the Neoforged Discord server.
 
+Thank you to:
+
+- @RogueLogix for reviews on the Blaze3d and Renderpearl changes
+
 ## Pack Changes
 
 There are a number of user-facing changes that are part of vanilla which are not discussed below that may be relevant to modders. You can find a list of them on [Misode's version changelog](https://misode.github.io/versions/?id=26.3&tab=changelog).
 
 ## There's Always a Client Rewrite
-
-TODO
 
 ### LWJGL with SDL
 
@@ -180,7 +182,7 @@ Like before, the passed in `RenderType` is only used to check whether it `Render
         - `getFbo` now has an overload that takes in the mipmap offset `int`
         - `$CacheKey` now takes in a mipmap offset `int`
     - `GlCommandEncoder#executeDrawMultiple` is removed
-        - Now just calls `executeDraw` multiple times
+        - The frontend now just calls `executeDraw` multiple times
     - `GlDevice` now takes in the `GlBackend` instead of the `long` window handle and default `ShaderSource`
         - `heuristics` - Returns the OpenGl device heuristics.
         - `getOrCompilePipeline`, `getOrCompileShader` are removed
@@ -195,10 +197,10 @@ Like before, the passed in `RenderType` is only used to check whether it `Render
         - `getUniform` now takes in an `int` index instead of the `String` name
         - `uniformCount` - Returns the number of uniforms used by the program.
         - `getUniforms` is removed
-        - `pushConstant` - Returns the push constant.
+        - `pushConstant` - Returns the UBO uniform emulating the push constant.
     - `GlRenderPass` no longer takes in a `boolean` for whether there is a depth texture
-        - `indexBufferDirty` - Whether the index buffer has new data to write.
-        - `scissorStateDirty` - Whether the scissor state has a new box to include the data of.
+        - `indexBufferDirty` - Whether the index buffer has been bound since the last draw.
+        - `scissorStateDirty` - Whether the scissor state has changed since the last draw.
         - `dirtyUniforms`, `anyUniformDirty` - Handles the marking of new data in uniforms.
         - `pushConstants`, `pushConstantsDirty` - Push constants defined in the pass.
     - `GlRenderPipeline` is now a final class instead of a record
@@ -213,7 +215,8 @@ Like before, the passed in `RenderType` is only used to check whether it `Render
     - `GlStateManager#_glReadBuffer` - Reads the buffer using the given color buffer.
     - `GlSurface` constructor is now package-private from `public`
     - `Uniform$Utb` no longer takes in the `int` location
-    - `VertexArrayCache` -> `VertexArray`, now sealed to `$Emulated`, `$Seperate`
+    - `VertexArrayCache` -> `VertexArray`, now sealed to `$Emulated`, `$Seperate`; not one-to-one
+        - The array objects are now owned by a given `GlRenderPipeline` instead of being globally cached
         - `create` replaced by `createSource`, providing the lambda to construct the array instead of the array itself
         - `bindVertexArray` replaced by `bind`, only taking in the `GpuBufferSlice` vertex buffers
         - `$Emulated`, `$Separate` constructors are now `private` instead of `public`
@@ -335,11 +338,10 @@ Like before, the passed in `RenderType` is only used to check whether it `Render
         - Definition interface in `renderpearl.api.commands.CommandEncoder`
     - `CommandEncoderBackend` -> `renderpearl.backend.api.CommandEncoderBackend`
     - `DeviceFeatures` -> `renderpearl.api.device.DeviceFeatures`
-        - `wireframeFillMode` - Whether the models can be rendered as wireframes.
-        - `shaderDrawParameters` is removed
+        - `wireframeFillMode` - If `PolygonMode#WIREFRAME` can be used to render the model.
     - `DeviceInfo` -> `renderpearl.api.device.DeviceInfo`
     - `DeviceLimits` -> `renderpearl.api.device.DeviceLimits`
-        - `maxDrawIndirectDrawCount` - The maximum number of indirect draws that can be made per frame.
+        - `maxDrawIndirectDrawCount` - The maximum number of indirect draws that can be made per `drawIndirect` call.
     - `DeviceType` -> `renderpearl.api.device.DeviceType`
     - `GpuBackend` -> `renderpearl.api.device.GpuBackend`
         - `setWindowHints`, `handleWindowCreationErrors` are removed
@@ -459,7 +461,7 @@ Like before, the passed in `RenderType` is only used to check whether it `Render
         - `compile` now takes in the `BackendRenderPipeline$CreateInfo` instead of the `VulkanBindGroupLayout`, `RenderPipeline`, and `long` modules
         - `device` - The gpu device of the pipeline.
         - `withDepthPipeline`, `withoutDepthPipeline` - The specific pipelines given the depth.
-        - `pipelineLayout` - The layouts for the pipeline.
+        - `pipelineLayout` - The layout for the pipeline, references a `VkPipelineLayout`.
         - `uniforms` - The uniforms used by the pipeline.
     - `VulkanUtils`
         - `enumerateExtensions` - Returns all available extensions for the device.
@@ -489,7 +491,7 @@ Like before, the passed in `RenderType` is only used to check whether it `Render
     - `PipelineBuilder` - The compiler for pipelines and their associated shaders.
     - `SPIRVModule` - An intermediate shader module implementation in the SPIR-V format.
     - `SpvUtil` - A utility for working with SPVs.
-- `com.mojang.renderpearl.util.UncheckedAutoCloseable` - An `AutoCloseable` that marks its implementation that it may already been destroyed during close.
+- `com.mojang.renderpearl.util.UncheckedAutoCloseable` - An `AutoCloseable` that removes the `Exception` throws from `close`.
 - `net.minecraft.client`
     - `Camera#extractRenderState` now takes in the `DeltaTracker` instead of the `float` partial tick
     - `ClientClockManager`
@@ -1186,14 +1188,6 @@ TODO
 Mostly the same implementations
 Resolvable stuff for data components
 
-### Datapack Brewing Recipes
-
-TODO
-
-Brewing recipe - why do this way
-Brewing fuel component
-Speed multiplier mention
-
 ### Block Transformers
 
 TODO
@@ -1201,6 +1195,14 @@ TODO
 Right click interact, replaces axe, hoe, shovel behavior
 Those associated classes removed
 Also a datapack registry
+
+### Datapack Brewing Recipes
+
+TODO
+
+Brewing recipe - why do this way
+Brewing fuel component
+Speed multiplier mention
 
 ### Cooking Fuel Component
 
