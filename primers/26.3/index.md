@@ -1160,10 +1160,77 @@ Of these, all three new data types validate against `LootContextParamSets#ALL_PA
 
 ### Reorganizing Pool Containers
 
-TODO
+The underlying structure of `LootPoolEntryContainer`s has been slightly reorganized to separate the difference between a single entry vs one that provides a set of entries.
 
-Removal of `LootPoolSingletonContainer`
-Replaced by `UniformContainerBase`, `SingleEntryContainerBase`, `ExpandableContainerBase`
+For this, `LootPoolSingletonContainer` was split into two classes: `UniformContainerBase` which handles the entry(s) and their weight(s), and its subclass `SingleEntryContainerBase` which indicates that the container only provides a single entry. `LootItem`, `DynamicLoot`, `SlotLoot`, and `EmptyLootItem` all extend `SingleEntryContainerBase`, with its methods being pretty much identical to `LootPoolSingletonContainer`, aside from the reloadable registry changes.
+
+For `TagEntry` and `NestedLootTable`, a new `UniformContainerBase` subtype was added called `ExpandableContainerBase`, which, if `expand` is `true`, allows an entry to be treated as a list of entries of one item each to select from, rather than one entry that provides all items:
+
+```java
+// A basic example showing the implementation difference.
+public class ExampleExpandableEntry extends ExpandableContainerBase {
+    // The map codec to register
+    public static final MapCodec<ExampleExpandableEntry> MAP_CODEC = RecordCodecBuilder.mapCodec(instance ->
+        instance.group(
+            RegistryCodecs.holderSet(Registries.ITEM).fieldOf("items").forGetter(e -> e.tag)
+        ).and(expandableFields(instance))
+        .apply(instance, ExampleExpandableEntry::new)
+    );
+    private final HolderSet<Item> items;
+
+    // The last five parameters are required for each expandable
+    // container.
+    public ExampleExpandableEntry(HolderSet<Item> items, boolean expand, int weight, int quality, Optional<Holder<LootItemCondition>> condition, Optional<Holder<LootItemFunction>> modifier) {
+        super(expand, weight, quality, condition, modifier);
+        this.items = items;
+    }
+
+    @Override
+    public MapCodec<ExampleExpandableEntry> codec() {
+        return MAP_CODEC;
+    }
+
+    @Override
+    protected boolean addExpandedEntries(Consumer<LootPoolEntry> output) {
+        // Adds as a separate entry per item.
+        // As separate entries, they can each be rolled individually, applying with
+        // the weight, conditions, and modifiers for each.
+        this.items.forEach(item -> output.accept(new UniformContainerBase.EntryBase() {
+            @Override
+            public void createItemStack(Consumer<ItemStack> output, LootContext context) {
+                output.accept(new ItemStack(item));
+            }
+        }));
+
+        // Returns whether the entries were added successfully.
+        return true;
+    }
+
+    @Override
+    protected boolean addUnexpandedEntry(Consumer<LootPoolEntry> output) {
+        // Adds a single entry for all items.
+        // As a single entry, if this is selected, all values inside will be provided.
+        output.accept(new UniformContainerBase.EntryBase() {
+            @Override
+            public void createItemStack(Consumer<ItemStack> output, LootContext context) {
+                ExampleExpandableEntry.this.items.forEach(item -> output.accept(new ItemStack(item)));
+            }
+        });
+
+        // Returns whether the entries was added successfully.
+        return true;
+    }
+
+    // A basic helper to construct the builder for data generation.
+    public static UniformContainerBase.Builder<?> contents(boolean expand, Holder<Item>... items) {
+        return simpleBuilder(
+            (weight, quality, conditions, functions) -> new ExampleExpandableEntry(
+                HolderSet.direct(items), expand, weight, quality, conditions, functions
+            )
+        );
+    }
+}
+```
 
 ### Loot Conditions and Functions: Tweaks and Registrations
 
@@ -1206,9 +1273,107 @@ Speed multiplier mention
 
 ### Cooking Fuel Component
 
-TODO
+What items can be used as fuel within furnace-like blocks are now specified by `DataComponents#COOKING_FUEL`, replacing `FuelValues`. The associated `CookingFuel` takes in a `ResolvableInt` for how any ticks the fuel should burn for, and a `ResolvableFloat` for how much to speed up the cook time. Both resolvable values are either a constant, or a `ContextIntProvider` / `ContextFloatProvider` reference that are resolved against the `LootContextParamSets#CONTAINER_PROCESS` context.
 
-Speed multiplier mention
+Note that, for furnace-like blocks, the cook time is calculated every tick, meaning that if the speed multiplier changes between burning fuels, the amount of time it takes to cook will also be adjusted.
+
+The component can be added through `Item$Properties#cookingFuel`, or directly through `Item$Properties#component`. Using `cookingFuel` expects a reference to datapack entries.
+
+```java
+// For some `Item`.
+new Item(
+    new Item.Properties()
+        .component(DataComponents.COOKING_FUEL, new CookingFuel(
+            // How many ticks the fuel should burn for.
+            new ResolvableInt.Constant(600),
+            // A scalar of how much faster it takes to cook the input.
+            // A value of `1` is the normal default.
+            // A value less than `1` makes cooking take longer.
+            // A value greater than `1` makes cooking faster.
+            new ResolvableFloat.Cosntant(1.0f)
+        ))
+);
+```
+
+It is generally recommended to use datapack-registered providers. Vanilla uses `minecraft:cooking/speed_default` for the common speed multiplier, saying that the fuel cooks inputs twice as fast if within a smoker or blast furnace. As for the fuel time, vanilla typically uses a `minecraft:div` int provider to make the fuel burn twice as fast within a smoker or blast furnace:
+
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+// The resource key to register
+public static final ResourceKey<ContextIntProvider> COOKING_TIME_EXAMPLE = ResourceKey.create(
+    Registries.CONTEXT_INT_PROVIDER,
+    Identifier.fromNamespaceAndPath("examplemod", "cooking/time_example")
+);
+
+builder.add(Registries.CONTEXT_INT_PROVIDER, bootstrap -> {
+    bootstrap.register(
+        COOKING_TIME_EXAMPLE,
+        // Divides the first value by the second value.
+        ContextIntProviders.div(
+            // The dividend, or in our case, the base number of ticks
+            // the fuel should burn for.
+            ContextIntProviders.exactly(600),
+            // The divisor, or in our case, whether to use fast or normal
+            // burn times depending on what block our fuel is within.
+            Holder.direct(new ConditionalValue(
+                // The predicate for our condition, or in our case,
+                // the blocks for which our fuel burns faster.
+                context.lookup(Registries.PREDICATE).getOrThrow(LootPredicates.FAST_FURNACE),
+                // The value to use if the condition returns true,
+                // or in our case, the fast burn divisor.
+                context.lookup(Registries.CONTEXT_INT_PROVIDER)
+                    .getOrThrow(ContextIntProviders.COOKING_FAST_BURN_TIME_REDUCTION_FACTOR),
+                // The value to use if the condition returns false,
+                // or in our case, the normal burn divisor.
+                context.lookup(Registries.CONTEXT_INT_PROVIDER)
+                    .getOrThrow(ContextIntProviders.COOKING_NORMAL_BURN_TIME_REDUCTION_FACTOR)
+            ))
+        ).value()
+    );
+});
+
+// For some `Item`.
+new Item(
+    new Item.Properties()
+        .component(DataComponents.COOKING_FUEL, new CookingFuel(
+            // How many ticks the fuel should burn for.
+            COOKING_TIME_EXAMPLE,
+            // A scalar of how much faster it takes to cook the input.
+            // A value of `1` is the normal default.
+            // A value less than `1` makes cooking take longer.
+            // A value greater than `1` makes cooking faster.
+            ContextFloatProviders.COOKING_DEFAULT_SPEED_MULTIPLIER
+        ))
+);
+```
+
+For reference, the JSON for our `ContextIntProvider` would look like so:
+
+```json5
+// In data/examplemod/context_int_provider/cooking/time_example.json
+{
+    // Divides the first value by the second value.
+    "type": "minecraft:div",
+    // The dividend, or in our case, the base number of ticks
+    // the fuel should burn for.
+    "left": 600,
+    // The divisor, or in our case, whether to use fast or normal
+    // burn times depending on what block our fuel is within.
+    "right": {
+        "type": "minecraft:conditional",
+        // The predicate for our condition, or in our case,
+        // the blocks for which our fuel burns faster.
+        "condition": "minecraft:block/fast_cooking",
+        // The value to use if the condition returns false,
+        // or in our case, the normal burn divisor.
+        "on_false": "minecraft:cooking/normal_burn_time_reduction_factor",
+        // The value to use if the condition returns true,
+        // or in our case, the fast burn divisor.
+        "on_true": "minecraft:cooking/fast_burn_time_reduction_factor"
+    }
+}
+```
 
 ### Villager Food Component
 
@@ -1222,24 +1387,73 @@ new Item(
     new Item.Properties()
         // How much nutrition the food should give to the villager.
         .villagerFood(1)
-)
+);
 ```
 
 ### Compostable Copmonent
 
-TODO
+What items can be thrown in a composter are now specified by `DataComponents#COMPOSTABLE`, replacing `ComposterBlock#COMPOSTABLES`. The associated `Compostable` takes in a `ResolvableInt` for how many layers should be added when used. The `ResolvableInt` can either be a constant or a `ContextIntProvider` reference that is resolved against the `LootContextParamSets#BLOCK_INTERACT` context.
 
-How many layers to add
-Clamps between 0 and 7 after adding
-Can technically be negative for reasons
+The component can be added through `Item$Properties#compostable`, or directly through `Item$Properties#component`. Using `compostable` expects a reference to a datapack `ContextIntProvider` entry.
+
+```java
+// For some `Item`.
+new Item(
+    new Item.Properties()
+        .component(DataComponents.COMPOSTABLE, new Compostable(
+            // How many layers to add to the composter.
+            // If the value is less than 0, no layer will be added.
+            // The composter level will always be clamped to between
+            // 0-7 inclusive.
+            new ResolvableInt.Constant(1)
+        ))
+);
+```
+
+It is generally recommended to use datapack-registered providers. Vanilla provides five providers for adding a layer to the composter: `minecraft:compostable/low` for a 30% chance to add a layer, `minecraft:compostable/low_medium` for a 50% chance, `minecraft:compostable/medium` for a 65% chance, `minecraft:compostable/medium_high` for a 85% chance, and `minecraft:compostable/always_add_one` for a 100% chance. However, if a composter is empty (only the vanilla `Blocks#COMPOSTER`), then it will always add a single layer.
+
+```java
+// For some `Item`.
+new Item(
+    new Item.Properties()
+        // How many layers to add to the composter.
+        // If the value is less than 0, no layer will be added.
+        // The composter level will always be clamped to between
+        // 0-7 inclusive.
+        .compostable(ContextIntProviders.COMPOSTABLE_ALWAYS_ADD_ONE)
+);
+```
 
 ### Hiding Amongst the Mobs: A Data Component
 
-TODO
+A new data component `DataComponents#MOB_VISIBILITY` has been added that can affect how visible the holding or wearing entity is to other mobs. The associated `MobVisibility` takes in two arguments: a `HolderSet` containing the `EntityType`s who are affected by the visbility change, and a scalar between 0-10 inclusive that determines how much the computed range of the viewing entity should be affected. For the mob visibility to be applied, it must have the `DataComponents#EQUIPPABLE` component with the item in the equipped slot.
 
-Holding an item will multiply the visibility by a set amount
-Apparently, you can be 1000% visible because visibility affects the range of notice
-Target specific entities
+As an example, an enderman has a target range of 64 blocks by default. Assuming no other modifiers, an item with a visibility of `0.5` will shrink the detection radius to 32 blocks. Likewise, a visbility of `2` will increase the detection radius to 128 blocks. However, a visibility of `0` will still have a minimum detection radius of 2 blocks, as defined within `TargetingConditions`.
+
+The component can be added through `Item$Properties#loweredMobVisibility`, or directly through `Item$Properties#delayedComponent`. Using `loweredMobVisibility` will create a direct `HolderSet` with a visibility of `0.5`:
+
+```java
+// For some `Item`.
+new Item(
+    new Item.Properties()
+        .delayedComponent(DataComponents.MOB_VISIBILITY, context -> new MobVisibility(
+            // The entities whose visibility are affected by this item.
+            // Can either be an entity type id, such as "minecraft:zombie",
+            // or a list of entity type ids, such as ["minecraft:zombie", "minecraft:skeleton", ...],
+            // or an entity type tag, such as "#minecraft:zombies".
+            // `HolderSet#direct` can be used instead of a tag lookup.
+            context.lookup(Registries.ENTITY_TYPE).getOrThrow(EntityTypeTags.ZOMBIES),
+            // The scalar that is multiplied to the mob's visibility range.
+            // Must be between 0-10 inclusive.
+            // A value less than `1` shrinks the visibility range.
+            // A value greater than `1` increases the visibility range.
+            0.1f
+        ))
+        // Mob visibility only works with `DataComponents#EQUIPPABLE`.
+        // Applied when item is in main hand.
+        .equippableUnswappable(EquipmentSlot.MAINHAND)
+);
+```
 
 ### Mob Spawn Settings Environment Attribute
 
@@ -1534,9 +1748,33 @@ public class ExampleBlock extends Block {
 
 ### Simplifying Types to Codecs
 
-TODO
+`BlockStateProvider`, `StructurePlacement`, and `PlacementModifier` no longer use a wrapping object type to act as their registered instances. Now, the registries directly take in the `MapCodec` used for the serialization and deserialization process. As such, `BlockStateProviderType`, `StructurePlacementType`, and `PlacementModifierType` have been removed. Additionally, `type` is now renamed to `codec`, taking in the registered `MapCodec`.
 
-Remove type classes for blockstateprovider, structureplacement, and placementmodifier
+```java
+// The following is an example with `PlacementModifier`s, but can roughly apply to the
+// other instances as well.
+public record IdentityPlacement() implements PlacementModifier {
+    public static final IdentityPlacement INSTANCE = new IdentityPlacement();
+    // The map codec used as the registry object.
+    public static final MapCodec<IdentityPlacement> MAP_CODEC = MapCodec.unit(INSTANCE);
+
+    // ...
+
+    // Replaces `type`
+    @Override
+    public MapCodec<IdentityPlacement> codec() {
+        // Return the registry object.
+        return MAP_CODEC;
+    }
+}
+
+// Register the map codec to the appropriate registry.
+Registry.register(
+    BuiltInRegistries.PLACEMENT_MODIFIER_TYPE,
+    Identifier.fromNamespaceAndPath("examplemod", "identity"),
+    IdentityPlacement.MAP_CODEC
+);
+```
 
 ### Configuring Features without `ConfiguredFeature`s
 
@@ -1552,6 +1790,87 @@ Placement modifier tweaks
 TODO
 
 Pretty much the same as features
+
+### Interfacing with `BlockStateProvider`s
+
+TODO
+
+Now an interface from the abstract class
+Just changes many of the implementations to be a record instead of a class
+
+### Interfacing with `StructurePlacement`s
+
+`StructurePlacement` is now an interface instead of an abstract class to allow more flexibility for where structures can generate. The original implementation is now called `AbstractSpreadingStructurePlacement`, which implements `StructurePlacement`.
+
+`StructurePlacement` inherits five methods from `AbstractSpreadingStructurePlacement`: `codec` for the registry type object used during serialization, `isStructureChunk` to determine if a structure can generate at the given chunk XZ, `applyAdditionalChunkRestrictions` for any additional restrictions that prevent the structure from generating in that chunk, `getLocatePos` that returns the `BlockPos` of the structure start when locating the structure, and `locateOffset` which offsets the `getLocatePos`. Only `isStructureChunk` and `codec` need to be implemented:
+
+```java
+// An example structure placement.
+public record InChunkStructurePlacement(ChunkPos pos) implements StructurePlacement {
+    // The codec for the placement type registry object.
+    public static final MapCodec<InChunkStructurePlacement> CODEC = ChunkPos.CODEC.fieldOf("pos")
+        .xmap(InChunkStructurePlacement::new, InChunkStructurePlacement::pos);
+
+    @Override
+    public boolean isStructureChunk(ChunkGeneratorStructureState state, int sourceX, int sourceZ) {
+        // Returns whether the structure can start generation in this chunk.
+        return this.pos.x() == sourceX && this.pos.z() == sourceZ;
+    }
+
+    @Override
+    public MapCodec<InChunkStructurePlacement> codec() {
+        // The codec used for serialization.
+        return CODEC;
+    }
+}
+
+// Register the map codec.
+Registry.register(
+    BuiltInRegistries.STRUCTURE_PLACEMENT,
+    Identifier.fromNamespaceAndPath("examplemod", "in_chunk"),
+    InChunkStructurePlacement.CODEC
+);
+```
+
+Then, the `StructurePlacement` can be used as part of a structure set:
+
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+// The resource key to register
+public static final ResourceKey<StructureSet> EXAMPLE_SET = ResourceKey.create(
+    Registries.STRUCTURE_SET,
+    Identifier.fromNamespaceAndPath("examplemod", "example_set")
+);
+
+builder.add(Registries.STRUCTURE_SET, bootstrap -> {
+    bootstrap.register(
+        EXAMPLE_SET,
+        new StructureSet(
+            List.of(/*...*/),
+            // Our structure placement.
+            new InChunkStructurePlacement(new ChunkPos(1, 1))
+        )
+    );
+});
+```
+
+And the generated JSON:
+
+```json5
+// For some structure set.
+// In `data/examplemod/worldgen/structure_set/example_set.json`
+{
+    // Our structure placement.
+    "placement": {
+        "type": "examplemod:in_chunk",
+        "pos": [ 1, 1]
+    },
+    "structures": [
+        // ...
+    ]
+}
+```
 
 ### Rewriting Density Functions
 
