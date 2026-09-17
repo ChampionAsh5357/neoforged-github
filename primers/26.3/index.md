@@ -18,10 +18,48 @@ There are a number of user-facing changes that are part of vanilla which are not
 
 ### LWJGL with SDL
 
-TODO
+The Lightweight Java Game Library (LWJGL) now ships with Simple DirectMedia Layer (SDL) instead of the Graphics Library Framework (GLFW). As such, most of the backend logic that called out to GLFW has either been completely removed or refashioned to use SDL method calls.
 
-Mention key events
-Text Input focusing through `TextInputManager`
+The most common changes visible to users involve handling input from the keyboard and mouse.
+
+The associated input codes now have different values. To remap these scancodes, you should either use the constants defined in `InputConstants` or `SDLScancode`:
+
+```java
+new KeyMapping(
+    "examplemod.key.example_key",
+    // The SDL scancode to capture when pressed.
+    InputConstants.KEY_M, // or SDLScancode#SDL_SCANCODE_E
+    KeyMapping.Category.MISC
+);
+```
+
+Note that we are now using the scancode as our 'key' with SDL instead of the logical key from GLFW. These both function equivalently, as GLFW keys are known as scancodes in SDL, while GLFW scancodes refer to SDL keycodes.
+
+For `KeyEvent`, this means that `key` refers to the values from `SDLScancode`, and `keycode` (renamed from `scancode`) refers to the values from `SDLKeycode`. `MouseButtonInfo#button` reference the `SDLMouse#SDL_BUTTON_*` constants. As for the input modifiers (e.g., lctrl, rshift), they are a mask of the `SDLKeycode#SDL_KMOD_*` constants.
+
+The other important change is how text input is handled. Due to the differences in how GLFW and SDL setup the callbacks, SDL requires `SDLKeyboard#SDL_StartTextInput` and `SDL_StopTextInput` to know when the player is typing. Vanilla implements these through `TextInputManager#startTextInput` and `stopTextInput`, taking in the object consuming the input. For use in GUIs, vanilla calls `TextureInputManager#onTextInputFocusChange` through `Minecraft#onTextInputFocusChange` to manage GUI element selection and focusing, while also handling any preedit events.
+
+As such, modders must make sure to call `TextureInputManager#onTextInputFocusChange` whenever the player should start or stop typing. For GUI elements, this should be within `GuiEventListener#setFocused` at a minimum:
+
+```java
+// For some basic gui element
+public class ExampleWidget extends AbstractWidget {
+
+    // ...
+
+    @Override
+    public void setFocused(boolean focused) {
+        super.setFocused(focused);
+
+        // Change the input focus.
+        // This may need to be called in other places depending on
+        // how your text input element is handled.
+        // You can also call the following instead if outside a GUI context:
+        // Minecraft.getInstance().textInputManager().onTextInputFocusChange(this, focused);
+        Minecraft.getInstance().onTextInputFocusChange(this, focused);
+    }
+}
+```
 
 ### Renderpearl
 
@@ -29,19 +67,6 @@ TODO
 
 Mention the changing names for the backends and frontends and api
 spv compilation then converted to glsl or kept for vulkan
-
-### Shader Extensions and Layouts
-
-TODO
-
-As the name implies, more syntax
-
-### Order Independent Transparency (OIT)
-
-TODO
-
-New pipeline handler for transparency
-Split into depth bounds, transmittance, and accumulate (likely using [moment-based OIT](https://momentsingraphics.de/Media/I3D2018/Muenstermann2018-MBOIT.pdf))
 
 ### No More Texture Override Shenanigans
 
@@ -58,6 +83,19 @@ TODO
 
 Phases are reorganized
 Gizmos, translucents, tags are shuffled around
+
+### Shader Extensions and Layouts
+
+TODO
+
+As the name implies, more syntax
+
+### Order Independent Transparency (OIT)
+
+TODO
+
+New pipeline handler for transparency
+Split into depth bounds, transmittance, and accumulate (likely using [moment-based OIT](https://momentsingraphics.de/Media/I3D2018/Muenstermann2018-MBOIT.pdf))
 
 ### Paletted Permutations Update
 
@@ -1243,9 +1281,57 @@ Registering some entries depending on common usage (e.g. silk touch)
 
 ### Registered Slot Sources
 
-TODO
+With the addition of reloadable registries, `SlotSource`s can now be registered to `Registries#SLOT_SOURCE`. While there is no restriction on where a referenced
+slot source can be used, vanilla only references them specifically for the `/item` and `/execute` commands. The rest are inlined within
+a loot table, if used at all.
 
-Yep, they're also registered now
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+// The resource key to register
+public static final ResourceKey<SlotSource> EMPTY = ResourceKey.create(
+    Registries.SLOT_SOURCE,
+    Identifier.fromNamespaceAndPath("examplemod", "empty")
+);
+
+builder.add(Registries.SLOT_SOURCE, bootstrap -> {
+    bootstrap.register(
+        EMPTY,
+        // An empty slot source.
+        new EmptySlotSource()
+    );
+});
+```
+
+```json5
+// In data/examplemod/slot_source/empty.json
+{
+    // An empty slot source.
+    "type": "minecraft:empty"
+}
+```
+
+Which can be referenced like:
+
+```json5
+// For some loot table.
+{
+    "pools": [
+        {
+            "rolls": 1,
+            "entries": [
+                {
+                    "type": "minecraft:slots",
+                    // Replaces the inlined entry.
+                    "slot_source": "examplemod:empty"
+                }
+                // ...
+            ]
+        }
+        // ...
+    ]
+}
+```
 
 ### Splitting Numbers into Floats and Ints
 
@@ -1791,6 +1877,10 @@ TODO
 
 Pretty much the same as features
 
+### More Template Rule Tests!
+
+Three more `RuleTest`s have been added for use in the template system: `AllOfRuleTest`, `AnyOfRuleTest`, and `NotRuleTest` representing AND, OR, and NOT repsectively. While these can be used individual, vanilla uses them to create an IF/ELSE statment (via `RuleTest#either`) to determine what blocks to replace with ores based on the current height of the feature position.
+
 ### Interfacing with `BlockStateProvider`s
 
 `BlockStateProvider` is now an interface instead of an abstract class. The only change aside from changing `extends` to `implements` is that `getState` now takes in a `LevelAccessor` instead of a `WorldGenLevel`.
@@ -1942,12 +2032,6 @@ TODO
 
 Renaming surface to material
 More of a direct correlation since there was already a difference between rule source and the evaluated rule
-
-### More Template Rule Tests!
-
-TODO
-
-AND, OR, NOT rule tests for the template predicates
 
 ### Noisy Musical Chairs
 
