@@ -9,6 +9,7 @@ If there's any incorrect or missing information, please file an issue on this re
 Thank you to:
 
 - @RogueLogix for reviews on the Blaze3d and Renderpearl changes
+- @crendgrim since the E key is not the M key
 
 ## Pack Changes
 
@@ -28,7 +29,7 @@ The associated input codes now have different values. To remap these scancodes, 
 new KeyMapping(
     "examplemod.key.example_key",
     // The SDL scancode to capture when pressed.
-    InputConstants.KEY_M, // or SDLScancode#SDL_SCANCODE_E
+    InputConstants.KEY_M, // or SDLScancode#SDL_SCANCODE_M
     KeyMapping.Category.MISC
 );
 ```
