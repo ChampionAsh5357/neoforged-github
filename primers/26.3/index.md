@@ -115,11 +115,13 @@ try (
 
 ### Shader Extensions and Layouts
 
-The Shader GLSL now has some additional features and changes regarding the the underlying syntax.
+The Shader GLSL now has some additional features and changes regarding the the underlying syntax as Shaderc is now used for compilation on both OpenGL and Vulkan via the `GlslCompiler`.
 
-For the changes, `#moj_import` was renamed to `#include` to import functions from other shaders. Additionally, both the `in` and `out` uniforms should specify their location in the layout to maintain a fixed read/write location for the values. This is especially valuable when some are included based on shader defines.
+As such, `#moj_import` was renamed to `#include` to import functions from other shaders. Additionally, both the `in` and `out` uniforms must specify their location in the layout to maintain a fixed read/write location when passing from vertex to fragment. This is especially valuable when some are included based on shader defines.
 
-Finally, most vanilla shaders require the machine to have the `GL_ARB_separate_shader_objects` OpenGL extension, failing if not present.
+Speaking of defines, `GlslCompiler` provides three macros: `RENDERPEARL_DEPTH_IS_ZERO_TO_ONE` for if the device coordinates are between 0-1 (always defined for Vulkan, if the machine has the `GL_ARB_clip_control` extension for OpenGL), `RENDERPEARL_EXPLICIT_DEPTH_INVARIANCE` for if the depth must be explicitly set (currently only Apple silicon machines), and `RENDERPEARL_INSTANCE_INDEX_INCLUDES_BASE_INSTANCE` for if the `gl_InstanceIndex` parameter either represents the instance index or `gl_InstanceID` (always defined for Vulkan, if the machine has the `GL_ARB_shader_draw_parameters` extension for OpenGL).
+
+Finally, most vanilla shaders require the machine to have the `GL_ARB_separate_shader_objects` extension as a requirement of Vulkan, failing if not present. This is functionally the same as requiring a higher GLSL version.
 
 ```glsl
 // In some shader file.
@@ -141,6 +143,11 @@ layout(location = 2) in vec2 UV0;
 layout(location = 3) in ivec2 UV1;
 layout(location = 4) in ivec2 UV2;
 
+// The location specified by the out uniforms in
+// the vertex shader must match the `in`s in the
+// fragment shader.
+// Since it matches by location now, the variable names
+// are ignored, but it is recommended to keep them consistent.
 layout(location = 0) out float sphericalVertexDistance;
 layout(location = 1) out float cylindricalVertexDistance;
 ```
