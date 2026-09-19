@@ -63,39 +63,290 @@ public class ExampleWidget extends AbstractWidget {
 
 ### Renderpearl
 
-TODO
+The render API that previously lived in Blaze3d has been split into a separate project called Renderpearl. All rendering classes that originally lived in Blaze3d have been migrated to `com.mojang.renderpearl`.
 
-Mention the changing names for the backends and frontends and api
-spv compilation then converted to glsl or kept for vulkan
+Packages in Renderpearl are roughly structured like so:
+
+- `com.mojang.renderpearl.api.*` - APIs for the elements the vanilla game interacts with.
+- `com.mojang.renderpearl.backend.*` - The objects that manage the actual logic to communicate with a graphics library.
+- `com.mojang.renderpearl.frontend.*` - The implemented APIs that the vanilla game interacts with. These classes handle most of the validation.
 
 ### No More Texture Override Shenanigans
 
-TODO
+`RenderSystem#outputColorTextureOverride` and `outputDepthTextureOverride` have been fully removed, closing one of the shenanigans then it came to writing to the GPU texture, especially for `FeatureRenderDispatcher`. Now, each try-with-resources creates the `RenderPass` to specify the textures to output to, along with any other information, like the `FeatureRenderDispatcher$PreparedFrame`:
 
-`RenderSystem#outputColorTextureOverride`, `outputDepthTextureOverride` fully removed
-Rendering a pass should be fully encompassed in the pass
-Feature dispatch inside render pass after binding uniforms
-`PreparedRenderType#drawFromBuffer` is now called within a render pass
+```java
+// Setup everything possible before the render frame
 
-### Feature Phase Changes
+// Create the texture to write to
+GpuDevice device = RenderSystem.getDevice();
+GpuTexture texture = device.createTexture(/*...*/);
+GpuTexture textureView = device.createTextureView(texture);
+GpuTexture depthTexture = device.createTexture(/*...*/);
+GpuTexture depthTextureView = device.createTextureView(depthTexture);
+device.createCommandEncoder().clearColorAndDepthTextures(texture, new Vector4f(0f), depthTexture, 0);
 
-TODO
+// ...
 
-Phases are reorganized
-Gizmos, translucents, tags are shuffled around
+// Write data for rendering
+SubmitNodeStorage storage = new SubmitNodeStorage();
+storage.submitCustomGeometry(/*...*/);
+
+// ...
+
+// Render to the texture.
+// This should only contain those critical to modify the render pass with
+// the correct info. Everything else should've been done prior.
+try (
+    FeatureRenderDispatcher.PreparedFrame frame = featureRenderDispatcher.prepareFrame(storage);
+    RenderPass pass = RenderSystem.getDevice()
+        .createCommandEncoder()
+        .createRenderPass(() -> "Example", textureView, Optional.empty(), depthTextureView, OptionalDouble.empty());
+) {
+    // Setup anything required by the pass.
+    RenderSystem.bindDefaultUniforms(pass);
+
+    //...
+
+    // Render to the textures.
+    FeatureRenderDispatcher.renderAllFeatures(pass, frame);
+}
+```
 
 ### Shader Extensions and Layouts
 
-TODO
+The Shader GLSL now has some additional features and changes regarding the the underlying syntax.
 
-As the name implies, more syntax
+For the changes, `#moj_import` was renamed to `#include` to import functions from other shaders. Additionally, both the `in` and `out` uniforms should specify their location in the layout to maintain a fixed read/write location for the values. This is especially valuable when some are included based on shader defines.
+
+Finally, most vanilla shaders require the machine to have the `GL_ARB_separate_shader_objects` OpenGL extension, failing if not present.
+
+```glsl
+// In some shader file.
+
+// Required extensions for the shader.
+#extension GL_ARB_separate_shader_objects : require
+
+// Includes for functions.
+#include <minecraft:light.glsl>
+#include <minecraft:fog.glsl>
+#include <minecraft:dynamictransforms.glsl>
+#include <minecraft:projection.glsl>
+#include <minecraft:sample_lightmap.glsl>
+
+// Layout followed by the location.
+layout(location = 0) in vec3 Position;
+layout(location = 1) in vec4 Color;
+layout(location = 2) in vec2 UV0;
+layout(location = 3) in ivec2 UV1;
+layout(location = 4) in ivec2 UV2;
+
+layout(location = 0) out float sphericalVertexDistance;
+layout(location = 1) out float cylindricalVertexDistance;
+```
 
 ### Order Independent Transparency (OIT)
 
-TODO
+Minecraft now supports the use of Order-Independent Transparency (OIT) through its improved transparency option. As the name implies, OIT is a rendering technique that tries to resolve alpha compositing without the underlying geometry having to be manually sorted by depth. Vanilla specifically uses [Moment-based OIT](https://momentsingraphics.de/Media/I3D2018/Muenstermann2018-MBOIT.pdf), which is a topic too complicated for a Minecraft primer. If you're interested, I suggest reading up on the topic yourself.
 
-New pipeline handler for transparency
-Split into depth bounds, transmittance, and accumulate (likely using [moment-based OIT](https://momentsingraphics.de/Media/I3D2018/Muenstermann2018-MBOIT.pdf))
+For our understanding, OIT runs through three stages: depth bounds, transmittance, and accumulate. In both depth bounds and transmittance, only the alpha is updated. It is only during the accumulate phase that the pixel color is set. As such, OIT requires updating both the vertex and the fragment shader. For both depth bounds and transmittance, alpha only OIT is denoted by the shader define `OIT_ALPHA_ONLY`, which you will see scattered across the supported shaders.
+
+Note that the following is the common usecase in vanilla's shaders. What you actually do will depend on your own.
+
+In the vertex shader, `OIT_ALPHA_ONLY` is commonly checked to prevent the fog, lightmap, or overlay color as they do not contribute to the alpha passes:
+
+```glsl
+// In some .vsh file.
+// In `assets/examplemod/shaders/core/example_oit_supported.vsh`
+#version 330
+#extension GL_ARB_separate_shader_objects : require
+
+#include <minecraft:fog.glsl>
+#include <minecraft:dynamictransforms.glsl>
+#include <minecraft:projection.glsl>
+#include <minecraft:sample_lightmap.glsl>
+
+// Some passed in uniforms.
+// We'll say UV0 is for our texture.
+// UV2 is the lightmap.
+
+layout(location = 0) in vec3 Position;
+layout(location = 1) in vec4 Color;
+layout(location = 2) in vec2 UV0;
+layout(location = 3) in ivec2 UV2;
+
+// The uniforms to pass to the fragment shader.
+
+// If the flag is not defined, include the fog distance.
+// Otherwise, it is not necessary for the alpha pass.
+#ifndef OIT_ALPHA_ONLY
+layout(location = 0) out float sphericalVertexDistance;
+layout(location = 1) out float cylindricalVertexDistance;
+#endif
+layout(location = 2) out vec4 vertexColor;
+layout(location = 3) out vec2 texCoord0;
+
+// If the flag is not defined, include the lightmap.
+// Otherwise, it is not necessary for the alpha pass.
+#ifndef OIT_ALPHA_ONLY
+uniform sampler2D Sampler2;
+#endif
+
+// Basic main function.
+void main() {
+    vec3 pos = Position + ModelOffset;
+    gl_Position = ProjMat * ModelViewMat * vec4(pos, 1.0);
+
+    // If the flag is not defined, set the color multiplied
+    // by the lightmap; otherwise, just leave the color for
+    // the alpha pass.
+    #ifndef OIT_ALPHA_ONLY
+    sphericalVertexDistance = fog_spherical_distance(Position);
+    cylindricalVertexDistance = fog_cylindrical_distance(Position);
+    vertexColor = Color * sample_lightmap(Sampler2, UV2);
+    #else
+    vertexColor = Color;
+    #endif
+    texCoord0 = UV0;
+}
+```
+
+In the fragment shader, it must include `minecraft:oit.glsl`, making sure to handle the correct inputs based on `OIT_ALPHA_ONLY`. During the depth bounds and transmittance phase, the fragment color is not set as part of the alpha phase, and instead `executeAlphaOnlyPhase` is called. Then, during accumulate, the fragment color is determined from the texture color passed into `sampleColorForAccumulation`.
+
+```glsl
+// In some .fsh file.
+// In `assets/examplemod/shaders/core/example_oit_supported.fsh`
+#version 330
+#extension GL_ARB_separate_shader_objects : require
+
+#include <minecraft:fog.glsl>
+#include <minecraft:dynamictransforms.glsl>
+#include <minecraft:oit.glsl>
+
+// The passed in uniforms.
+
+uniform sampler2D Sampler0;
+
+// Matching the flag based on the vertex shader outputs
+// for the same reasons.
+#ifndef OIT_ALPHA_ONLY
+layout(location = 0) in float sphericalVertexDistance;
+layout(location = 1) in float cylindricalVertexDistance;
+#endif
+layout(location = 2) in vec4 vertexColor;
+layout(location = 3) in vec2 texCoord0;
+
+// The output uniforms.
+
+// If the flag is not defined, include the fragment color.
+// Otherwise, it is not necessary for the alpha pass.
+#ifndef OIT_ALPHA_ONLY
+layout(location = 0) out vec4 fragColor;
+#endif
+
+// Calculate the final fragment color.
+vec4 calculateFinalColor(vec4 color) {
+    // If in the accumulate phase, sample the OIT calculated color.
+    #ifdef OIT_ACCUMULATE
+    color = sampleColorForAccumulation(color);
+    vec4 fogColor = vec4(FogColor.rgb * color.a, FogColor.a);
+    #else
+    vec4 fogColor = FogColor;
+    #endif
+
+    // Compute the fragment color.
+    return apply_fog(color, sphericalVertexDistance, cylindricalVertexDistance, FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd, fogColor);
+}
+
+void main() {
+    vec4 color = texture(Sampler0, texCoord0) * vertexColor * ColorModulator;
+
+    // If in an alpha only phase, update the OIT values.
+    #ifdef OIT_ALPHA_ONLY
+    executeAlphaOnlyPhase(gl_FragCoord.z, color.a);
+    #else
+    // Otherwise, set the fragment color.
+    fragColor = calculateFinalColor(color);
+    #endif
+}
+```
+
+These shaders can then be used like any other `RenderPipeline`:
+
+```java
+public static final RenderPipeline.Snippet GENERIC_EXAMPLE_SNIPPET = RenderPipeline.builder()
+    // Setting up all the layouts and transforms used.
+    .withBindGroupLayout(BindGroupLayouts.GLOBALS)
+    .withBindGroupLayout(BindGroupLayouts.FOG)
+    .withBindGroupLayout(BindGroupLayouts.SAMPLER0)
+    .withVertexBinding(0, DefaultVertexFormat.BLOCK)
+    .withPrimitiveTopology(PrimitiveTopology.QUADS)
+    .withDepthStencilState(DepthStencilState.DEFAULT)
+    .withBindGroupLayout(BindGroupLayouts.DYNAMIC_TRANSFORMS)
+    // Specify our vertex shaders and the like.
+    .withVertexShader(Identifier.withNamespaceAndPath("examplemod", "core/example_oit_supported"))
+    .withFragmentShader(Identifier.withNamespaceAndPath("examplemod", "core/example_oit_supported"))
+    .buildSnippet();
+
+public static final RenderPipeline.Snippet EXAMPLE_OIT_SUPPORTED_SNIPPET = RenderPipeline.builder(GENERIC_EXAMPLE_SNIPPET)
+    // Setting up all the layouts and transforms used.
+    .withBindGroupLayout(BindGroupLayouts.SAMPLER2)
+    .withBindGroupLayout(BindGroupLayouts.PROJECTION)
+    .buildSnippet();
+
+public static final RenderPipeline CLASSIC_EXAMPLE_OIT_SUPPORTED = RenderPipeline.builder(EXAMPLE_OIT_SUPPORTED_SNIPPET)
+    .withLocation(Identifier.withNamespaceAndPath("examplemod", "pipeline/example_oit_supported"))
+    .withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT))
+    .withDepthStencilState(DepthStencilState.DEFAULT)
+    .build();
+```
+
+The pipeline on its own cannot make use of OIT, however. For that, we need to create an `OitPipelineSet`, created through `builder`. At its core, the builder constructs three `RenderPipeline`s corresponding to each of the three phases. It takes in a base snippet that will be accessible to all three phases, but if one pipeline requires additional uniforms or layouts, it can be specified using `with*Modifier`. Finally, the OIT pipeline is built using `build`:
+
+```java
+public static final OitPipelineSet EXAMPLE_OIT_SUPPORTED = OitPipelineSet.builder(
+        // A suffix for naming the pipeline.
+        "example_oit_supported",
+        // The basic builder for the three phases.
+        // Note that we pass in a snippet containing all of the
+        // non-phase isolated shader code.
+        RenderPipeline.builder(GENERIC_EXAMPLE_SNIPPET)
+    )
+    // If we need to modify the pipeline, we can call:
+    // - withDepthBoundsModifier
+    // - withTransmittanceModifier
+    // - withAccumulateModifier
+    // In our case, our shader makes use of Sampler2 for the final color,
+    // so it should be provided during the final phase (i.e., accumulate).
+    .withAccumulateModifier(accumulate -> accumulate.withBindGroupLayout(BindGroupLayouts.SAMPLER2))
+    .build();
+```
+
+Then, within our `RenderType`, we can specify the OIT pipeline to use by calling `RenderSetup#setOitPipelines`:
+
+```java
+public static RenderType oitSupported(Identifier texture) {
+    // Set the classic pipeline without OIT support.
+    RenderSetup state = RenderSetup.builder(CLASSIC_EXAMPLE_OIT_SUPPORTED)
+        // Set the OIT pipelines.
+        .setOitPipelines(EXAMPLE_OIT_SUPPORTED)
+        .withTexture("Sampler0", texture)
+        .useLightmap()
+        .sortOnUpload()
+        .createRenderSetup();
+    return RenderType.create("examplemod:oit_supported", state);
+}
+```
+
+With all that, we can then make use of the OIT pipeline by calling `RenderType#prepare` and finally `PreparedRenderType#drawFromBufferOit` within a `RenderPass`, setting all the required uniforms.
+
+### Feature Phase Changes
+
+The render phases used by the `FeatureRenderDispatcher` have been partially reorganized due to some renames.
+
+`SubmitNodeCollection#seeThroughNameTags` is now called `seeThrough` to hold both name tags and text with fonts having `DisplayMode#SEE_THROUGH`. Additionally, `nameTag` only contains the translucent portion, with anything solid being sent to `solid`. `gizmos` was renamed to `translucentGizmos`, while `alwaysOnTop` was renamed to `alwaysOnTopGizmos`. Solid gizmos were also merged into `solid`.
+
+Additionally, if improved transparency (OIT) is enabled, then `seeThrough`, `shadows`, `nameTags`, `texts`, `shapeOutlines`, `translucentBlocksAndItems`, `translucentModels`, `translucentCustomGeometry`, `breakingOverlay`, `afterTerrain`, and `translucentGizmos` all use `oitTranslucent`. This means that if you have a `SubmitNodeStorage` opted into OIT via `setUseImprovedTransparency`, you cannot use `FeatureRenderDispatcher#renderAllFeatures` as it will render the same phase elements multiple times.
 
 ### Paletted Permutations Update
 
@@ -1272,12 +1523,37 @@ public class ExampleExpandableEntry extends ExpandableContainerBase {
 
 ### Loot Conditions and Functions: Tweaks and Registrations
 
-TODO
+With the addition of reloadable registries, the `LootItemCondition`s and `LootItemFunction`s have some minor tweaks to better fit the datapack registry design. As a result, some conditions are referenced registered instead of inlined, like checking whether a tool can silk touch or shear (see `LootPredicates`).
 
-Minor changes with the conditions and functions
-Basically, just passing around one that's compiled together
-Allow for holder inputs
-Registering some entries depending on common usage (e.g. silk touch)
+```java
+// A basic example.
+// For actually registering loot tables, it should be done
+// through the `LootTableSubProvider`.
+private static void registerTables(BootstrapContext<LootTable> context) {
+    LootTable.lootTable().withPool(
+        LootPool.lootPool()
+            // Reference a registered condition.
+            .when(context.lookup(Registries.PREDICATE).getOrThrow(LootPredicates.TOOL_CAN_SILK_TOUCH))
+            // ...
+    );
+}
+```
+
+For `LootItemCondition`s, the `ConditionUserBuilder` can now take in a `Holder`-wrapped condition in its `when` clause. When composing a condition within the loot table context, any list of conditions are merged into a single inlined holder via `ConditionUserBuilder#buildCondition`. The actual implementation of the conditions remain exactly the same.
+
+For `LootItemFunction`, the common superclass `LootItemConditionalFunction` also takes in a single optional, `Holder`-wrapped condition instead of a list due to composition changes. Similarly, the `FunctionUserBuilder` can now take in a `Holder`-wrapped function in its `apply` clause. Any list of functions are merged into a single inlined holder via `FunctionUserBuilder#buildFunction`, and as such, `LootItemFunction#decorate` now takes in that optional, `Holder`-wrapped function the modify the dropped outputs. If implementing a custom `LootItemConditionalFunction`, the constructor will need to be updated:
+
+```java
+// A basic conditional function.
+public class NoOpFunction extends LootItemConditionalFunction {
+
+    // Takes in a single condition that is composed together rather than
+    // a list.
+    public NoOpFunction(Optional<Holder<LootItemCondition>> condition) {
+        super(condition);
+    }
+}
+```
 
 ### Registered Slot Sources
 
@@ -1335,27 +1611,658 @@ Which can be referenced like:
 
 ### Splitting Numbers into Floats and Ints
 
-TODO
+`NumberProvider` which handled retrieving a `float` or `int` given some context, has now been split into two interfaces: `ContextFloatProvider` for `float`s, and `ContextIntProvider` for `int`s. Their implementations are nearly identical, just with the word `float` swapped out for `int`, and vice versa.
 
-`NumberProvider` split into `ContextIntProvider`, `ContextFloatProvider`
-Mostly the same implementations
-Resolvable stuff for data components
+Both providers are `Validatable` and must implement `getFloatUnsafe` or `getIntUnsafe`, which returns the value and could potentially through an `ArithmeticException`. If the exception should be ignored, the values can be obtained using `getFloat` or `getInt`, returning `0` if the exception is thrown. Given that floats have non-finite representations, `ContextFloatProvider` also returns `0` if the result is non-finite, or can throw an `ArithmeticException` using `getFloatOrThrow`. To register the provider for use, a `MapCodec` must be created, returned by `codec`, and registered to `BuiltInRegistries#CONTEXT_FLOAT_PROVIDER_TYPE` or `CONTEXT_INT_PROVIDER_TYPE`.
+
+```java
+// Some basic number providers.
+public record FloatZeroValue() implements ContextFloatProvider {
+    public static final FloatZeroValue INSTANCE = new FloatZeroValue();
+    // The codec to register.
+    public static final MapCodec<FloatZeroValue> MAP_CODEC = MapCodec.unit(INSTANCE);
+
+    @Override
+    public MapCodec<FloatZeroValue> codec() {
+        // Links the codec to the provider implementation for
+        // serialization.
+        return MAP_CODEC;
+    }
+
+    @Override
+    public void validate(ValidationContext context) {
+        // If using any loot data type, validate it here.
+    }
+
+    @Override
+    public float getFloatUnsafe(LootContext random) {
+        // Return the value provided.
+        return 0f;
+    }
+}
+
+public record IntZeroValue() implements ContextIntProvider {
+    public static final IntZeroValue INSTANCE = new IntZeroValue();
+    // The codec to register.
+    public static final MapCodec<IntZeroValue> MAP_CODEC = MapCodec.unit(INSTANCE);
+
+    @Override
+    public MapCodec<IntZeroValue> codec() {
+        // Links the codec to the provider implementation for
+        // serialization.
+        return MAP_CODEC;
+    }
+
+    @Override
+    public void validate(ValidationContext context) {
+        // If using any loot data type, validate it here.
+    }
+
+    @Override
+    public int getIntUnsafe(LootContext random) {
+        // Return the value provided.
+        return 0;
+    }
+}
+
+// Register the map codecs.
+Registry.register(
+    BuiltInRegistries.CONTEXT_FLOAT_PROVIDER_TYPE,
+    Identifier.fromNamespaceAndPath("examplemod", "float_zero"),
+    FloatZeroValue.MAP_CODEC
+);
+Registry.register(
+    BuiltInRegistries.CONTEXT_INT_PROVIDER_TYPE,
+    Identifier.fromNamespaceAndPath("examplemod", "int_zero"),
+    IntZeroValue.MAP_CODEC
+);
+```
+
+As reloadable registries, the providers can be registed and used by referenced rather than inlined to `Registries#CONTEXT_FLOAT_PROVIDER` or `CONTEXT_INT_PROVIDER`:
+
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+// The resource keys to register.
+public static final ResourceKey<ContextFloatProvider> FLOAT_ZERO = ResourceKey.create(
+    Registries.CONTEXT_FLOAT_PROVIDER,
+    Identifier.fromNamespaceAndPath("examplemod", "zero")
+);
+public static final ResourceKey<ContextIntProvider> INT_ZERO = ResourceKey.create(
+    Registries.CONTEXT_INT_PROVIDER,
+    Identifier.fromNamespaceAndPath("examplemod", "zero")
+);
+
+// Add them to the appropriate provider.
+builder.add(Registries.CONTEXT_FLOAT_PROVIDER, bootstrap -> {
+    bootstrap.register(
+        FLOAT_ZERO,
+        // Our float provider.
+        new FloatZeroValue()
+    );
+});
+builder.add(Registries.CONTEXT_INT_PROVIDER, bootstrap -> {
+    bootstrap.register(
+        INT_ZERO,
+        // Our int provider.
+        new IntZeroValue()
+    );
+});
+```
+
+And the generated JSON:
+
+```json5
+// For some float provider.
+// In `data/examplemod/worldgen/context_float_provider/zero.json`
+{
+    // Our float provider.
+    "type": "examplemod:zero"
+}
+
+// For some int provider.
+// In `data/examplemod/worldgen/context_int_provider/zero.json`
+{
+    // Our int provider.
+    "type": "examplemod:zero"
+}
+```
+
+Due to the many similarities bewteen the types of providers implemented, vanilla also provides some simple interfaces that can be implemented in addition to the provider of your choice. These implement `Validatable#validate` along with providing a way to construct the `MapCodec`. The other methods defined typically match the signature of an associated argument in a record constructor.
+
+```java
+// A provider using a basic interface.
+// Since we are modifying one value of another provider, we use `UnaryProvider`.
+// `input` implemented by the record argument.
+public record CubeRoot(Holder<ContextFloatProvider> input) implements ContextFloatProvider, UnaryProvider<ContextFloatProvider> {
+    // The codec to register.
+    public static final MapCodec<CubeRoot> MAP_CODEC = UnaryProvider.codec(
+        // The value codec, or the codec for the generic type.
+        ContextFloatProviders.CODEC,
+        // A method that takes in the `input` and returns the constructed object.
+        CubeRoot::new
+    );
+
+    @Override
+    public MapCodec<CubeRoot> codec() {
+        return MAP_CODEC;
+    }
+
+    @Override
+    public float getFloatUnsafe(LootContext context) {
+        // Perform the operation through the available API methods.
+        return (float) Math.cbrt(this.input().value().getFloatUnsafe(context));
+    }
+}
+
+// Register the map codec.
+Registry.register(
+    BuiltInRegistries.CONTEXT_FLOAT_PROVIDER_TYPE,
+    Identifier.fromNamespaceAndPath("examplemod", "cube_root"),
+    CubeRoot.MAP_CODEC
+);
+```
+
+Finally, `ContextFloatProvider` and `ContextIntProvider` can be used outside the inlined, loot table context, for such things like data components. Given the reloadable nature, vanilla provided `ResolvableFloat` and `ResolvableInt` to hold either a constant or `ResourceKey` for the associated provider to resolve against. You can see examples of this in the other subsections below.
 
 ### Block Transformers
 
-TODO
+`BlockTransformer` is a new datapack component and world datapack registry that is used to turn one block into another, such as when right-clicking with an item. This replaces `AxeItem#STRIPPABLES` with `BlockTransformers#AXE`, `ShovelItem#FLATTENABLES` with `BlockTransformers#SHOVEL`, and `HoeItem#TILLABLES` with `BlockTransformers#HOE`. As this was the last remaining difference compared to a normal `Item`, `AxeItem`, `ShovelItem`, and `HoeItem` have been removed.
 
-Right click interact, replaces axe, hoe, shovel behavior
-Those associated classes removed
-Also a datapack registry
+`BlockTransformer` takes in a list of `BlockTransformData`, which is checked against to determine whether the transformation can apply. Each `BlockTransformData` takes in the `BlockStateProvider` holder that determines the block to place, the `SoundEvent` holder to play on a successful transformation, the `$TransformParticle` to spawn on success, a list of `Direction`s that prevent the transformation (e.g., shovel flatenning cannot be done on the `Direction#DOWN` face of the block), an optional `LootTable` key for any items to drop on success, the `$DropStrategy` for where the loot should be dropped from, whether to update the newly placed block using the neighbor states (e.g. connecting a fence to other nearby fence posts), a `$TransformType` which is only added for fixing copper chest behavior, whether the held item should be consumed on use, and how much damage to apply to the item when used. Some of these settings are exclusive to one another and are limited in the modded context due to their implementation.
+
+Note that the transformations are entirely controlled by the `BlockStateProvider`, meaning that the block transformer can transform any block into any other block, regardless of condition.
+
+As a world datapack registry, it is highly recommended to generate the entry instead of inlining it. Additionally, for broader support, it is worthile to create a `BlockStateProvider` that can determine its entries using a find first approach:
+
+```java
+// A basic block state provider that resolves using a tag.
+// With this, new entries can be added to the transformer based on a tag
+// rather than overriding the entire transformer.
+public class FindFirstStateProvider(@Nullable Holder<BlockStateProvider> fallback, HolderSet<BlockStateProvider> providers) implements BlockStateProvider {
+    public static final MapCodec<FindFirstStateProvider> CODEC = RecordCodecBuilder.mapCodec(instance ->
+        instance.group(
+            BlockStateProvider.CODEC.optionalFieldOf("fallback").forGetter(provider -> Optional.ofNullable(provider.fallback)),
+            RegistryCodecs.holderSet(Registries.BLOCK_STATE_PROVIDER, BlockStateProvider.DIRECT_CODEC).fieldOf("providers")
+                .forGetter(FindFirstStateProvider::providers)
+        ).apply(instance, FindFirstStateProvider::new)
+    );
+
+    @Override
+    public MapCodec<FindFirstStateProvider> codec() {
+        return CODEC;
+    }
+
+    @Override
+    public BlockState getState(LevelAccessor level, RandomSource random, BlockPos pos) {
+        // Redirect to optional for convenience.
+        @Nullable
+        BlockState result = this.getOptionalState(level, random, pos);
+        return result != null ? result : level.getBlockState(pos);
+    }
+
+    @Nullable
+    @Override
+    public BlockState getOptionalState(LevelAccessor level, RandomSource random, BlockPos pos) {
+        return this.providers.stream()
+            // Get the optional state.
+            .map(provider -> provider.value().getOptionalState(level, random, pos))
+            // Filter out any null values.
+            .filter(Objects::nonNull)
+            // Get the first value that matches.
+            .findFirst()
+            // If all values returned null, evaluate fallback.
+            .orElseGet(
+                () -> this.fallback == null ? null : this.fallback.value().getOptionalState(level, random, pos)
+            );
+    }
+}
+
+// Register the map codec.
+Registry.register(
+    BuiltInRegistries.BLOCK_STATE_PROVIDER_TYPE,
+    Identifier.fromNamespaceAndPath("examplemod", "find_first"),
+    FindFirstStateProvider.CODEC
+);
+```
+
+As for the transformer itself:
+
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+public static final TagKey<BlockStateProvider> EXAMPLE_TRANSFORMER_ENTRIES = TagKey.create(
+    Registries.BLOCK_TRANSFORMER,
+    Identifier.fromNamespaceAndPath("examplemod", "transformer/example_entries")
+);
+
+// The resource key to register.
+public static final ResourceKey<BlockTransformer> EXAMPLE_TRANSFORMER = ResourceKey.create(
+    Registries.BLOCK_TRANSFORMER,
+    Identifier.fromNamespaceAndPath("examplemod", "example_transformer")
+);
+
+// Add to the appropriate provider.
+builder.add(Registries.BLOCK_TRANSFORMER, bootstrap -> {
+    bootstrap.register(
+        EXAMPLE_TRANSFORMER,
+        // Create the transformer.
+        new BlockTransformer(
+            // The list of data entries to apply.
+            List.of(
+                // Create the transformer, typically through `BlockTransformData#builder`
+                BlockTransformData.builder(
+                    // The provider that returns the block to place.
+                    new FindFirstStateProvider(
+                        null, bootstrap.lookup(Registries.BLOCK_TRANSFORMER).getOrThrow(EXAMPLE_TRANSFORMER_ENTRIES)
+                    )
+                ).sound(
+                    // The sound event to play on a successful transformation.
+                    // If your sound event isn't already a holder, it can be wrapped
+                    // using `Registry#wrapAsHolder`.
+                    // Defaults to the empty sound.
+                    BuiltInRegistries.SOUND_EVENT.wrapAsHolder(SoundEvents.AMETHYST_CLUSTER_HIT)
+                ).particle(
+                    // The particle to show on a successful transformation.
+                    // This must be a `$TranformParticle`:
+                    // - NONE (No particles)
+                    // - SCRAPE (`ParticleTypes#SCRAPE` via level event 3005)
+                    // - WAX_ON (`ParticleTypes#WAX_ON` via level event 3003)
+                    // - WAX_OFF (`ParticleTypes#WAX_OFF` via level event 3004)
+                    // Defaults to NONE.
+                    BlockTransformer.TranformParticle.NONE
+                ).disallowedFaces(
+                    // A list of directions that this transform data does not apply for.
+                    // In the item use context, if a direction in this list matches the
+                    // clicked face of a block, the transform data is skipped.
+                    // Defaults to an empty list.
+                    List.of()
+                ).loot(
+                    // A loot table of any additional items to drop on a successful
+                    // transformation. Vanilla uses this to drop hanging roots when
+                    // tilling rooted dirt.
+                    // If none is present, then no additional loot drops.
+                    // Defaults to an empty optional.
+                    BuiltInLootTables.END_CITY_TREASURE
+                ).dropStrategy(
+                    // If a loot table is specified, how the items should drop on a
+                    // successful transformation. This is ignored if no loot table
+                    // is set.
+                    // This must be a `$DropStrategy`:
+                    // - CLICKED_FACE (Drops from the clicked face position)
+                    // - FROM_MIDDLE (Drops from the middle of the block)
+                    // Defaults to FROM_MIDDLE.
+                    BlockTransformer.DropStrategy.CLICKED_FACE
+                ).updateFromNeighbors(
+                    // Whether this block should be updated by its adjacent
+                    // neighbors via `BlockState#updateShape`. This should
+                    // only be `false` in very particularized situations that
+                    // are not normally encountered.
+                    // Defaults to `true`.
+                    true
+                ).transformType(
+                    // The type of transform being applied on success. This
+                    // is currently only for handling some update differences
+                    // for copper chests.
+                    // This must be a `$TransformType`:
+                    // - SINGLE_BLOCK (A regular old block)
+                    // - COPPER_CHEST (A copper chest transformation)
+                    // Defaults to SINGLE_BLOCK.
+                    BlockTransformer.TransformType.SINGLE_BLOCK
+                ).consumeOnUse(
+                    // When `true`, the held `ItemStack` is consumed on a successful
+                    // transformation. This is ignored if the item is not stackable.
+                    false
+                ).itemDamagePerUse(
+                    // The amount of durability to take away from the item when performing
+                    // a successful transformation. This is ignored if the item is stackable.
+                    1
+                ).build()
+            )
+            // ...
+        )
+    );
+});
+```
+
+And the generated JSON:
+
+```json5
+// For some block transformer.
+// In `data/examplemod/block_transformer/example_transformer.json`
+// The list of data entries to apply.
+[
+    {
+        // The provider that returns the block to place.
+        "block_state_provider": {
+            "type": "examplemod:find_first",
+            "providers": "#examplemod:transformer/example_entries"
+        },
+        // The sound event to play on a successful transformation.
+        // Defaults to the empty sound.
+        "sound": "minecraft:block.amethyst_cluster.hit",
+        // The particle to show on a successful transformation.
+        // Either:
+        // - none (No particles)
+        // - scrape (`ParticleTypes#SCRAPE` via level event 3005)
+        // - wax_on (`ParticleTypes#WAX_ON` via level event 3003)
+        // - wax_off (`ParticleTypes#WAX_OFF` via level event 3004)
+        // Defaults to none.
+        "particle": "none",
+        // A list of directions that this transform data does not apply for.
+        // In the item use context, if a direction in this list matches the
+        // clicked face of a block, the transform data is skipped.
+        // Defaults to an empty list.
+        "disallowed_faces": [],
+        // A loot table of any additional items to drop on a successful
+        // transformation. Vanilla uses this to drop hanging roots when
+        // tilling rooted dirt.
+        // If none is present, then no additional loot drops.
+        // Defaults to an empty optional.
+        "loot": "minecraft:chests/end_city_treasure",
+        // If a loot table is specified, how the items should drop on a
+        // successful transformation. This is ignored if no loot table
+        // is set.
+        // Either:
+        // - clicked_face (Drops from the clicked face position)
+        // - from_middle (Drops from the middle of the block)
+        // Defaults to from_middle.
+        "drop_strategy": "clicked_face",
+        // Whether this block should be updated by its adjacent
+        // neighbors via `BlockState#updateShape`. This should
+        // only be `false` in very particularized situations that
+        // are not normally encountered.
+        // Defaults to `true`.
+        "update_from_neighbors": true,
+        // The type of transform being applied on success. This
+        // is currently only for handling some update differences
+        // for copper chests.
+        // Either:
+        // - single_block (A regular old block)
+        // - copper_chest (A copper chest transformation)
+        // Defaults to single_block.
+        "transform_type": "single_block",
+        // When `true`, the held `ItemStack` is consumed on a successful
+        // transformation. This is ignored if the item is not stackable.
+        "consume_on_use": false,
+        // The amount of durability to take away from the item when performing
+        // a successful transformation. This is ignored if the item is stackable.
+        "item_damage_per_use": 1
+    }
+    // ...
+]
+```
+
+For the item, the component can be added through `Item$Properties#delayedComponent` via `DataComponents#BLOCK_TRANSFORMER`:
+
+```java
+// For some `Item`.
+new Item(
+    new Item.Properties()
+        .delayedComponent(DataComponents.BLOCK_TRANSFORMER, context -> context.getOrThrow(EXAMPLE_TRANSFORMER))
+);
+```
 
 ### Datapack Brewing Recipes
 
-TODO
+The brewing system has been converted to a `Recipe` for the mix and a `DataComponents#BREWING_FUEL` data component for the fuel, replacing `PotionBrewing` and `ItemTags#BREWING_FUEL`.
 
-Brewing recipe - why do this way
-Brewing fuel component
-Speed multiplier mention
+The `Recipe` implementation is handled by `BrewingRecipe` under `RecipeType#BREWING`. `BrewingRecipe` takes in a `PotionIngredient` for the input slots and the fuel (reagent), and outputs an `ItemStackTemplate`. The length of time it takes for a potion to be brewed remains fixed at twenty seconds. A `PotionIngredient` is an `Ingredient` with an optional `PotionsPredicate` on the `DataComponents#POTION_CONTENTS`. Generating the recipes is handled through `BrewingRecipeBuilder`, where potion mixes are handled through `brewingMix` and container transformers through `brewingContainerTransform`. Unfortunately, both of these methods of handling recipes require you to specify every possible combination. For brewing mixes, this means at least four recipes, one for each vanilla container. And as for the container transforms, its one per every potion in the bottle.
+
+Essentially, if you do not know a potion or container exists, the recipe will no longer work. As such, the more flexible method is to create a subtype of `BrewingRecipe` to handle mixes and container transforms:
+
+```java
+// The following examples are for basic potions as vanilla has
+// done before in `PotionBrewing`.
+
+// We extend `BrewingRecipe` for these to put our items within
+// the relevant `RecipePropertySet`s. If we choose not to extend
+// `BrewingRecipe`, we would need to patch in our recipe checks
+// where the set is used.
+
+public class BrewingMixRecipe extends BrewingRecipe {
+    // The serialization objects.
+    public static final MapCodec<BrewingMixRecipe> MIX_MAP_CODEC = RecordCodecBuilder.mapCodec(
+        i -> i.group(
+                PotionsPredicate.CODEC.fieldOf("input").forGetter(o -> o.input.potions().get()),
+                Ingredient.CODEC.fieldOf("reagent").forGetter(o -> o.reagent.ingredient()),
+                PotionContents.CODEC.fieldOf("output").forGetter(o -> o.output.components().get(DataComponentMap.EMPTY, DataComponents.POTION_CONTENTS))
+            )
+            .apply(i, BrewingMixRecipe::new)
+    );
+    public static final StreamCodec<RegistryFriendlyByteBuf, BrewingMixRecipe> MIX_STREAM_CODEC = StreamCodec.composite(
+        PotionsPredicate.STREAM_CODEC,
+        o -> o.input.potions().get(),
+        Ingredient.STREAM_CODEC,
+        o -> o.reagent.ingredient(),
+        PotionContents.STREAM_CODEC,
+        o -> o.output.components().get(DataComponentMap.EMPTY, DataComponents.POTION_CONTENTS),
+        BrewingMixRecipe::new
+    );
+    public static final RecipeSerializer<BrewingMixRecipe> MIX_SERIALIZER = new RecipeSerializer<>(MIX_MAP_CODEC, MIX_STREAM_CODEC);
+
+    // Take in the potion on the item, the ingredient as part of the reagent,
+    // and the ouputted contents.
+    public BrewingMixRecipe(PotionsPredicate input, Ingredient reagent, PotionContents output) {
+        // Provide default values for the super ingredients.
+        super(
+            new PotionIngredient(Ingredient.of(Items.POTION), Optional.of(input)),
+            new PotionIngredient(reagent, Optional.empty()),
+            new ItemStackTemplate(
+                Items.POTION, DataComponentPatch.builder()
+                    .set(DataComponents.POTION_CONTENTS, output)
+                    .build()
+            )
+        );
+    }
+
+    @Override
+    public boolean matches(BrewingInput brew) {
+        // Override matches to properly test the input without looking at the item.
+        return this.input.potions().get().matches(brew.input()) && this.reagent.test(brew.reagent());
+    }
+
+    @Override
+    public ItemStack assemble(BrewingInput brew) {
+        // Override assemble to copy the input stack with the new components.
+        ItemStack result = brew.input().copyWithCount(1);
+        result.applyComponents(this.output().components());
+        return result;
+    }
+
+    @Override
+    public RecipeSerializer<BrewingMixRecipe> getSerializer() {
+        // Override to set to our serializer.
+        return MIX_SERIALIZER;
+    }
+}
+
+public class BrewingContainerTransformRecipe extends BrewingRecipe {
+    // The serialization objects.
+    public static final MapCodec<BrewingContainerTransformRecipe> CONTAINER_MAP_CODEC = RecordCodecBuilder.mapCodec(
+        i -> i.group(
+                Ingredient.CODEC.fieldOf("input").forGetter(o -> o.input.ingredient()),
+                Ingredient.CODEC.fieldOf("reagent").forGetter(o -> o.reagent.ingredient()),
+                ItemStackTemplate.CODEC.fieldOf("output").forGetter(o -> o.output)
+            )
+            .apply(i, BrewingContainerTransformRecipe::new)
+    );
+    public static final StreamCodec<RegistryFriendlyByteBuf, BrewingContainerTransformRecipe> CONTAINER_STREAM_CODEC = StreamCodec.composite(
+        Ingredient.STREAM_CODEC,
+        o -> o.input.ingredient(),
+        Ingredient.STREAM_CODEC,
+        o -> o.reagent.ingredient(),
+        ItemStackTemplate.STREAM_CODEC,
+        o -> o.output,
+        BrewingContainerTransformRecipe::new
+    );
+    public static final RecipeSerializer<BrewingContainerTransformRecipe> CONTAINER_SERIALIZER = new RecipeSerializer<>(CONTAINER_MAP_CODEC, CONTAINER_STREAM_CODEC);
+
+    // Take in the original container, the ingredient as part of the reagent,
+    // and the ouputted contents.
+    public BrewingContainerTransformRecipe(Ingredient input, Ingredient reagent, ItemStackTemplate output) {
+        // Provide default values for the super ingredients.
+        super(
+            new PotionIngredient(input, Optional.empty()),
+            new PotionIngredient(reagent, Optional.empty()),
+            output
+        );
+    }
+
+    @Override
+    public boolean matches(BrewingInput brew) {
+        // Override matches to properly test the input without looking at the potions.
+        return this.input.ingredient().matches(brew.input()) && this.reagent.test(brew.reagent());
+    }
+
+    @Override
+    public ItemStack assemble(BrewingInput brew) {
+        // Override assemble to create the output stack with the input stack's components.
+        return this.output.apply(1, brew.input().getComponentsPatch());
+    }
+
+    @Override
+    public RecipeSerializer<BrewingContainerTransformRecipe> getSerializer() {
+        // Override to set to our serializer.
+        return CONTAINER_SERIALIZER;
+    }
+}
+
+// Register the serializers.
+Registry.register(
+    BuiltInRegistries.RECIPE_SERIALIZER,
+    Identifier.fromNamespaceAndPath("examplemod", "mix"),
+    BrewingMixRecipe.MIX_SERIALIZER
+);
+Registry.register(
+    BuiltInRegistries.RECIPE_SERIALIZER,
+    Identifier.fromNamespaceAndPath("examplemod", "container_transform"),
+    BrewingContainerTransformRecipe.CONTAINER_SERIALIZER
+);
+```
+
+Then, we can generate the recipes using a custom `RecipeBuilder` or directly:
+
+```java
+// In some `RecipeProvider` subtype
+@Override
+protected void buildRecipes() {
+    // A generic mix recipe.
+    this.output.accept(
+        ResourceKey.create(
+            Registries.RECIPE, Identifier.fromNamespaceAndPath("examplemod", "brewing/water_to_thick")
+        ),
+        new BrewingMixRecipe(
+            PotionsPredicate.ofPotion(Potions.WATER),
+            Ingreident.of(Items.GLOWSTONE_DUST),
+            new PotionContents(Potions.THICK)
+        ),
+        null
+    );
+
+    // A generic container recipe.
+    this.output.accept(
+        ResourceKey.create(
+            Registries.RECIPE, Identifier.fromNamespaceAndPath("examplemod", "brewing/potion_to_splash_potion")
+        ),
+        new BrewingContainerTransformRecipe(
+            Ingredient.of(Items.POTION),
+            Ingreident.of(Items.GUNPOWDER),
+            new ItemStackTemplate(Items.SPLASH_POTION)
+        ),
+        null
+    );
+}
+```
+
+And the generated JSONs:
+
+```json5
+// In `data/examplemod/recipe/brewing/water_to_thick.json`
+{
+    "type": "examplemod:mix",
+    "input": {
+        "potions": "minecraft:water"
+    },
+    "reagent": "minecraft:glowstone_dust",
+    "output": {
+        "potion": "minecraft:thick"
+    }
+}
+
+// In `data/examplemod/recipe/brewing/potion_to_splash_potion.json`
+{
+    "type": "examplemod:container_transform",
+    "input": "minecraft:potion",
+    "reagent": "minecraft:gunpowder",
+    "output": {
+        "id": "minecraft:splash_potion"
+    }
+}
+```
+
+The fuel is handled by `DataComponents#BREWING_FUEL`. The associated `BrewingFuel` takes in a `ResolvableInt` for how any uses the fuel provides, and a `ResolvableFloat` for how much to speed up the brew time. Both resolvable values are either a constant, or a `ContextIntProvider` / `ContextFloatProvider` reference that are resolved against the `LootContextParamSets#CONTAINER_PROCESS` context.
+
+Note that, for brewing stands, the brew time is calculated every tick, meaning that if the speed multiplier changes between burning fuels, the amount of time it takes to brew will also be adjusted.
+
+The component can be added through `Item$Properties#brewingFuel`, or directly through `Item$Properties#component`. Using `brewingFuel` expects a reference to datapack entries.
+
+```java
+// For some `Item`.
+new Item(
+    new Item.Properties()
+        .component(DataComponents.BREWING_FUEL, new BrewingFuel(
+            // How many times can the fuel be used.
+            new ResolvableInt.Constant(600),
+            // A scalar of how much faster it takes to brew the input.
+            // A value of `1` is the normal default.
+            // A value less than `1` makes brewing take longer.
+            // A value greater than `1` makes brewing faster.
+            new ResolvableFloat.Cosntant(1.0f)
+        ))
+);
+```
+
+It is generally recommended to use datapack-registered providers. Vanilla uses `minecraft:brewing/speed_default` for the common speed multiplier, which is always `1`. As for the fuel uses, vanilla specifies the default uses in `minecraft:brewing/uses_default`, which is always `20`.
+
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+// The resource key to register
+public static final ResourceKey<ContextIntProvider> BREWING_USES_EXAMPLE = ResourceKey.create(
+    Registries.CONTEXT_INT_PROVIDER,
+    Identifier.fromNamespaceAndPath("examplemod", "brewing/uses_example")
+);
+
+builder.add(Registries.CONTEXT_INT_PROVIDER, bootstrap -> {
+    bootstrap.register(
+        BREWING_USES_EXAMPLE,
+        // The number of uses the fuel provides.
+        new ConstantValue(10)
+    );
+});
+
+// For some `Item`.
+new Item(
+    new Item.Properties()
+        .component(DataComponents.BREWING_FUEL, new BrewingFuel(
+            // How many times can the fuel be used.
+            BREWING_USES_EXAMPLE,
+            // A scalar of how much faster it takes to brew the input.
+            // A value of `1` is the normal default.
+            // A value less than `1` makes brewing take longer.
+            // A value greater than `1` makes brewing faster.
+            ContextFloatProviders.BREWING_DEFAULT_SPEED_MULTIPLIER
+        ))
+);
+```
+
+For reference, the JSON for our `ContextIntProvider` would look like so:
+
+```json5
+// In data/examplemod/context_int_provider/brewing/uses_example.json
+10
+```
 
 ### Cooking Fuel Component
 
@@ -1864,18 +2771,218 @@ Registry.register(
 
 ### Configuring Features without `ConfiguredFeature`s
 
-TODO
+`Feature`, `ConfiguredFeature`, and `FeatureConfiguration` have been merged together into a single `Feature` interface, similar to most other type and dapatack registry implementations: where a `MapCodec` represents the statically registered type, and the `Feature` interface itself is the world datapack registry. As such, the registries have been renamed to reflect that fact: `BuiltInRegistries#FEATURE` is now `FEATURE_TYPE`, while `Registries#CONFIGURED_FEATURE` (`minecraft:worldgen/configured_feature`) is now `FEATURE` (`minecraft:worldgen/feature`).
 
-Feature system reimplementation
-Feature is now an interface of which the configured part is just the implementation
-Placed feature more or less the same
-Placement modifier tweaks
+The methods on `Feature` are either now defaulted methods or have been moved to the `Feature` subtype that used them (e.g. `AbstractOreFeature`). The three most important that remain are `codec` to attach the feature type to the feature; `place`, which now takes in the `WorldGenLevel`, `ChunkGenerator`, `RandomSource`, and origin `BlockPos`; and `getSubFeatures`, which returns any other features used by the current feature.
+
+```java
+// An example feature.
+public record PlaceFirstFeature(HolderSet<PlacedFeature> features) implements Feature {
+    // The feature type map codec to register.
+    public static final MapCodec<PlaceFirstFeature> CODEC = ExtraCodecs.nonEmptyHolderSet(PlacedFeature.LIST_CODEC)
+        .fieldOf("features").xmap(PlaceFirstFeature::new, PlaceFirstFeature::features);
+
+    @Override
+    public MapCodec<PlaceFirstFeature> codec() {
+        // Attach the feature type to the feature.
+        return CODEC;
+    }
+
+    @Override
+    public Stream<Holder<Feature>> getSubFeatures() {
+        // Return all additional potential features.
+        // Otherwise, this should return an empty stream.
+        return this.features.stream().flatMap(f -> f.value().getFeatures());
+    }
+
+    @Override
+    public boolean place(WorldGenLevel level, ChunkGenerator chunkGenerator, RandomSource random, BlockPos origin) {
+        // Place any blocks for the feature.
+        // Usually using `setBlock` or `safeSetBlock`.
+        // Returns `true` if the feature was placed successfully, or otherwise `false`.
+
+        // Create the placer for the feature.
+        FeaturePlacer placer = new FeaturePlacer(level, chunkGenerator);
+
+        for (Holder<PlacedFeature> feature : this.features) {
+            if (placer.place(feature.value(), random, origin)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+// Register the map codec.
+Registry.register(
+    BuiltInRegistries.FEATURE_TYPE,
+    Identifier.fromNamespaceAndPath("examplemod", "place_first"),
+    PlaceFirstFeature.CODEC
+);
+```
+
+Note the `FeaturePlacer` call. This is how `PlacedFeature`s are placed into the world and where all the placement methods like `placeWithBiomeCheck` now live.
+
+The `Feature` can then be registered to the world datapack registry:
+
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+// The resource key to register.
+public static final ResourceKey<Feature> EXAMPLE_FEATURE = ResourceKey.create(
+    Registries.FEATURE,
+    Identifier.fromNamespaceAndPath("examplemod", "example_feature")
+);
+
+builder.add(Registries.FEATURE, bootstrap -> {
+    bootstrap.register(
+        EXAMPLE_FEATURE,
+        // Our feature.
+        new PlaceFirstFeature(
+            bootstrap.lookup(Registries.FEATURE).getOrThrow(FeatureTags.CAN_SPAWN_FROM_BONE_MEAL)
+        )
+    );
+});
+```
+
+And the generated JSON:
+
+```json5
+// For some feature.
+// In `data/examplemod/worldgen/feature/example_feature.json`
+{
+    // Our feature.
+    "type": "examplemod:place_first",
+    "features": "#minecraft:can_spawn_from_bone_meal"
+}
+```
+
+As for the `PlacedFeature`, it remains the same, including the order of the `PlacementModifier`s; however, `PlacementModifier#getPositions` has been replaced by `modify`. `modify` takes the `BlockPos`s through a `Consumer<BlockPos>` instead of returning a `Stream<BlockPos>`:
+
+```java
+// An example placement modifier.
+public record IdentityPlacement() implements PlacementModifier {
+    public static final IdentityPlacement INSTANCE = new IdentityPlacement();
+    // The map codec used as the registry object.
+    public static final MapCodec<IdentityPlacement> MAP_CODEC = MapCodec.unit(INSTANCE);
+
+    @Override
+    public MapCodec<IdentityPlacement> codec() {
+        // Return the registry object.
+        return MAP_CODEC;
+    }
+
+    @Override
+    public void modify(PlacementContext context, RandomSource random, BlockPos origin, Consumer<BlockPos> output) {
+        // Like previously, the origin represents either the feature starting point or a position generated from
+        // a previous modifier.
+        // Make any modifications and pass the position to the consumer output for it to be used by the attached
+        // feature.
+        output.accept(origin);
+    }
+}
+
+// Register the map codec.
+Registry.register(
+    BuiltInRegistries.PLACEMENT_MODIFIER_TYPE,
+    Identifier.fromNamespaceAndPath("examplemod", "identity"),
+    IdentityPlacement.MAP_CODEC
+);
+```
 
 ### Configured Carvers without `ConfiguredWorldCarver`
 
-TODO
+`WorldCarver`, `ConfiguredWorldCarver`, and `CarverConfiguration` have been merged together into a single `WorldCarver` interface, similar to most other type and dapatack registry implementations: where a `MapCodec` represents the statically registered type, and the `WorldCarver` interface itself is the world datapack registry. As such, the registries have been renamed to reflect that fact: `BuiltInRegistries#CARVER` is now `CARVER_TYPE`, while `Registries#CONFIGURED_CARVER` (`minecraft:worldgen/configured_carver`) is now `CARVER` (`minecraft:worldgen/carver`).
 
-Pretty much the same as features
+The methods on `WorldCarver` are either now defaulted / static methods or have been removed. The three most important that remain are `codec` to attach the carver type to the carver; `carver`, which now takes in the `WorldGenerationContext`, `RandomSource`, chunk and source chunk `ChunkPos`, and the `CarverOutput`; and `isStartChunk`, which returns whether this is where the carver should start carving.
+
+```java
+// An example carver.
+public record SingleEllipsoidCarver(float probability, HeightProvider y) implements WorldCarver {
+    // The carver type map codec to register.
+    public static final MapCodec<SingleEllipsoidCarver> MAP_CODEC = RecordCodecBuilder.mapCodec(instance ->
+        instance.group(
+            Codec.floatRange(0.0F, 1.0F).fieldOf("probability").forGetter(SingleEllipsoidCarver::probability),
+            HeightProvider.CODEC.fieldOf("y").forGetter(SingleEllipsoidCarver::y),
+        )
+        .apply(instance, CanyonWorldCarver::new)
+    );
+
+    @Override
+    public MapCodec<SingleEllipsoidCarver> codec() {
+        // Attach the carver type to the carver.
+        return MAP_CODEC;
+    }
+
+    @Override
+    public boolean isStartChunk(RandomSource random) {
+        // Check whether this is the starting chunk for the carver.
+        return random.nextFloat() <= this.probability;
+    }
+
+    @Override
+    public boolean carve(WorldGenerationContext context, RandomSource random, ChunkPos chunkPos, ChunkPos sourceChunkPos, CarverOutput output) {
+        // Carve out any blocks.
+        // Usually `CarverOutput#carve` or `WorldCarver#carveEllipsoid`.
+        // Returns `true` if the carver was executed successfully, or otherwise `false`.
+
+        WorldCarver.carveEllipsoid(
+            chunkPos,
+            sourceChunkPos.getBlockX(random.nextInt(16)),
+            this.y.sample(random, context),
+            sourceChunkPos.getBlockZ(random.nextInt(16)),
+            1,
+            1,
+            output,
+            (xd, yd, zd, y1) -> false
+        );
+        return true;
+    }
+}
+
+// Register the map codec.
+Registry.register(
+    BuiltInRegistries.CARVER_TYPE,
+    Identifier.fromNamespaceAndPath("examplemod", "single"),
+    SingleEllipsoidCarver.MAP_CODEC
+);
+```
+
+The `WorldCarver` can then be registered to the world datapack registry:
+
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+// The resource key to register.
+public static final ResourceKey<WorldCarver> EXAMPLE_CARVER = ResourceKey.create(
+    Registries.CARVER,
+    Identifier.fromNamespaceAndPath("examplemod", "example_carver")
+);
+
+builder.add(Registries.CARVER, bootstrap -> {
+    bootstrap.register(
+        EXAMPLE_CARVER,
+        // Our carver.
+        new SingleEllipsoidCarver(
+            0.1f, VerticalAnchor.absolute(60)
+        )
+    );
+});
+```
+
+And the generated JSON:
+
+```json5
+// For some carver.
+// In `data/examplemod/worldgen/carver/example_carver.json`
+{
+    // Our carver.
+    "type": "examplemod:single",
+    "probability": 0.1,
+    "y": 60
+}
+```
 
 ### More Template Rule Tests!
 
@@ -1886,7 +2993,7 @@ Three more `RuleTest`s have been added for use in the template system: `AllOfRul
 `BlockStateProvider` is now an interface instead of an abstract class. The only change aside from changing `extends` to `implements` is that `getState` now takes in a `LevelAccessor` instead of a `WorldGenLevel`.
 
 ```java
-// An example block stat provider.
+// An example block state provider.
 public record AirProvider() implements BlockStateProvider {
     public static final AirProvider INSTANCE = new AirProvider();
     // The map codec used as the registry object.
@@ -1918,7 +3025,7 @@ Block state providers can either be inlined or referenced as a world datapack re
 ```java
 // For some RegistrySetBuilder builder to generate the datapack entries.
 
-// The resource key to register
+// The resource key to register.
 public static final ResourceKey<BlockStateProvider> EXAMPLE_PROVIDER = ResourceKey.create(
     Registries.BLOCK_STATE_PROVIDER,
     Identifier.fromNamespaceAndPath("examplemod", "example_provider")
@@ -1983,7 +3090,7 @@ Then, the `StructurePlacement` can be used as part of a structure set:
 ```java
 // For some RegistrySetBuilder builder to generate the datapack entries.
 
-// The resource key to register
+// The resource key to register.
 public static final ResourceKey<StructureSet> EXAMPLE_SET = ResourceKey.create(
     Registries.STRUCTURE_SET,
     Identifier.fromNamespaceAndPath("examplemod", "example_set")
@@ -2028,10 +3135,150 @@ Usage more or less the same
 
 ### Not a Surface, but a Material
 
-TODO
+All references to the surface system have been replaced with the word 'material' (e.g. `SurfaceSystem` -> `MaterialSystem`). Additionally, `MaterialRules` (once `SurfaceRules`) has had its inner types split into separate files in response to material rules and conditions now having their own world datapack registries. As such, `BuiltInRegistries#MATERIAL_CONDITION`, `MATERIAL_RULE` are now `MATERIAL_CONDITION_TYPE`, `MATERIAL_RULE_TYPE`.
 
-Renaming surface to material
-More of a direct correlation since there was already a difference between rule source and the evaluated rule
+The underlying classes themselves remain relatively the same for implementation.
+
+`SurfaceRules$RuleSource` is now `MaterialRule`, `compile`d to a `RuleEvaluator` (previously `SurfaceRules$SurfaceRule`) using the `MaterialRuleContext` (previously `SurfaceRules$Context`):
+
+```java
+public record RandomRule(List<BlockState> states) implements MaterialRule {
+    // The material rule type map codec to register.
+    public static final MapCodec<RandomRule> CODEC = ExtraCodecs.nonEmptyList(BlockState.CODEC.listOf())
+        .fieldOf("states").xmap(RandomRule::new, RandomRule::states);
+
+    @Override
+    public MapCodec<RandomRule> codec() {
+        // Attach the material rule type to the material rule.
+        return CODEC;
+    }
+
+    // Previously `apply`.
+    @Override
+    public RuleEvaluator compile(MaterialRuleContext context) {
+        // Compiles the evaulator to return a block state
+        // based on the passed position.
+        PositionalRandomFactory factory = context.getOrCreateRandomFactory(
+            Identifier.fromNamepsaceAndPath("examplemod", "random")
+        );
+        return (blockX, blockY, blockZ) -> {
+            RandomSource random = randomFactory.at(blockX, blockY, blockZ);
+            return states.get(random.nextInt(states.size()));
+        };
+    }
+}
+
+// Register the map codec.
+Registry.register(
+    BuiltInRegistries.MATERIAL_RULE_TYPE,
+    Identifier.fromNamespaceAndPath("examplemod", "random_rule"),
+    RandomRule.CODEC
+);
+```
+
+Then, the `MaterialRule` can be registered or inlined:
+
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+// The resource key to register.
+public static final ResourceKey<MaterialRule> EXAMPLE_RULE = ResourceKey.create(
+    Registries.MATERIAL_RULE,
+    Identifier.fromNamespaceAndPath("examplemod", "example_rule")
+);
+
+builder.add(Registries.MATERIAL_RULE, bootstrap -> {
+    bootstrap.register(
+        EXAMPLE_RULE,
+        // Our material rule.
+        new RandomRule(
+            List.of(Blocks.DIRT.defaultBlockState())
+        )
+    );
+});
+```
+
+And the generated JSON:
+
+```json5
+// For some material rule.
+// In `data/examplemod/worldgen/material_rule/example_rule.json`
+{
+    // Our material rule.
+    "type": "examplemod:random_rule",
+    "states": [
+        "minecraft:dirt"
+    ]
+}
+```
+
+`MaterialCondition` (previously `SurfaceRules$ConditionSource`) is similar, where the condition is `compile`d to a `ConditionEvaluator` (previously `SurfaceRules$Condition`) using the `MaterialRuleContext`:
+
+```java
+public record ProbabilityCondition(float probability) implements MaterialCondition {
+    // The material condition type map codec to register.
+    public static final MapCodec<ProbabilityCondition> CODEC = Codec.floatRange(0.0F, 1.0F)
+        .fieldOf("probability").xmap(
+            ProbabilityCondition::new, ProbabilityCondition::probability
+        );
+
+    @Override
+    public MapCodec<ProbabilityCondition> codec() {
+        // Attach the material condition type to the material condition.
+        return CODEC;
+    }
+
+    // Previously `apply`.
+    @Override
+    public ConditionEvaluator compile(MaterialRuleContext context) {
+        // Compiles the evaulator to test whether the given condition is
+        // valid.
+        RandomSource random = context.getOrCreateRandomFactory(
+            Identifier.fromNamepsaceAndPath("examplemod", "random")
+        ).fromHashOf(Identifier.fromNamepsaceAndPath("examplemod", "random"));
+        return () -> random.nextFloat() < this.probability;
+    }
+}
+
+// Register the map codec.
+Registry.register(
+    BuiltInRegistries.MATERIAL_CONDITION_TYPE,
+    Identifier.fromNamespaceAndPath("examplemod", "random_condition"),
+    ProbabilityCondition.CODEC
+);
+```
+
+Then, the `MaterialCondition` can be registered or inlined:
+
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+// The resource key to register.
+public static final ResourceKey<MaterialCondition> EXAMPLE_CONDITION = ResourceKey.create(
+    Registries.MATERIAL_CONDITION,
+    Identifier.fromNamespaceAndPath("examplemod", "example_condition")
+);
+
+builder.add(Registries.MATERIAL_CONDITION, bootstrap -> {
+    bootstrap.register(
+        EXAMPLE_CONDITION,
+        // Our material condition.
+        new ProbabilityCondition(0.1f)
+    );
+});
+```
+
+And the generated JSON:
+
+```json5
+// For some material condition.
+// In `data/examplemod/worldgen/material_condition/example_condition.json`
+{
+    // Our material condition.
+    "type": "examplemod:random_condition",
+    "probability": 0.1
+}
+```
 
 ### Noisy Musical Chairs
 
@@ -3455,6 +4702,7 @@ NormalNoise -> Noise
     - `ConditionalProvider` - A provider that determines which provider to use based on the result of a `LootItemCondition`.
     - `ConstantValue` -> `.floats.ConstantValue`, `.ints.ConstantValue`
     - `DispatcherProvider` - A provider that determines which provider to use based on the first attached `LootItemCondition` that returns true, otherwise defaulting to a specified provider. Basically a find first implementation.
+    - `DistributionProvider` - A provider that selects which provider to use from a weighted list.
     - `EnchantmentLevelProvider` -> `.floats.EnchantmentLevelProvider`, no `int` variant; now implements `LootContextUser`
     - `EnvironmentAttributeProvider` - A provider that reads the value of an `EnvironmentAttribute`.
     - `EnvironmentAttributeValue` -> `.floats.EnvironmentAttributeValue`, `.ints.EnvironmentAttributeValue`; now implements `EnvironmentAttributeProvider`
