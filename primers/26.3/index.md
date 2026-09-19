@@ -3127,11 +3127,118 @@ And the generated JSON:
 
 ### Rewriting Density Functions
 
-TODO
+`DensityFunction` has been split into the raw, registered values in `DensityFunction`, and the compiled values to sample within `DensitySampler`. This is similar to the material rules and conditions (previously surface rules) splitting the actual raw value with the compiled evaluator.
 
-Splitting function into function and compiled sampler
-dfrewriterule for optimization
-Usage more or less the same
+`DensityFunction` has five methods that require implementing. First is the `codec` representing the function type, now a standard `MapCodec`. Next is the `range` of values the function can produce, replacing `minValue` and `maxValue`. `domainAxes` represent a bit mask corresponding to the `Direction$Axis`es operate within: `1` for X, `2` for Y, and `4` for Z. `rewriteChildren` takes in a `DfRewriteRule` used to rewrite the child functions, typically for inlining or simplifying slices. Finally, `compileSampler` creates the `DensitySampler` used to compute the value at a given position. `DensitySampler` inherits `compute` and `fillArray` as `sampleValue` and `sampleVolume`, respectively.
+
+```java
+// An example density function
+public record SineFunction(DensityFunction input) implements DensityFunction {
+    // The function type map codec to register.
+    public static final MapCodec<SineFunction> CODEC = DensityFunction.CODEC.fieldOf("input")
+        .xmap(SineFunction::new, SineFunction::input);
+    
+    @Override
+    public MapCodec<SineFunction> codec() {
+        // Attach the function type to the function.
+        return CODEC;
+    }
+
+    @Override
+    public Interval range() {
+        // Sine function can only output [-1, 1].
+        return Interval.of(-1f, 1f);
+    }
+
+    @Override
+    public @DensityFunction.Axes int domainAxes() {
+        // Should match the axes operating upon.
+        // In our case, the input function's axes.
+        return this.input.domainAxes();
+    }
+
+    @Override
+    public DensityFunction rewriteChildren(DfRewriteRule rule) {
+        // Rewrite the children, and if there's a change, construct a new function.
+        DensityFunction input = rule.rewrite(this.input);
+        return input == this.input ? this : new SineFunction(input);
+    }
+
+    @Override
+    public DensitySampler compileSampler(DensityFunction.CompileContext context) {
+        // We can optimize by checking if the input is constant.
+        if (this.input instanceof ConstantFunction(float value)) {
+            return new ConstantFunction.Sampler(Mth.sin(value));
+        }
+        // Otherwise, we pipe the sampler to our own.
+
+        // Compile the sampler into a density sampler.
+        DensitySampler input = this.input.compileSampler(context);
+        return new SineFunction.Sampler(input);
+    }
+
+    // Our sampler instance.
+    public record Sampler(DensitySampler input) implements DensitySampler {
+        @Override
+        public void sampleVolume(SamplerContext context, DensityBuffer outputBuffer, DensityVolume volume) {
+            // Sample the input first.
+            this.input.sampleVolume(context, outputBuffer, volume);
+
+            // Then replace with the computed value.
+            for (int i = 0; i < outputBuffer.size(); i++) {
+                outputBuffer.set(i, Mth.sin(outputBuffer.get(i)));
+            }
+        }
+
+        @Override
+        public float sampleValue(SamplerContext context, int blockX, int blockY, int blockZ) {
+            // Sample the value at the given position.
+            return Mth.sin(this.input.sampleValue(context, blockX, blockY, blockZ));
+        }
+    }
+}
+
+// Register the map codec.
+Registry.register(
+    BuiltInRegistries.DENSITY_FUNCTION_TYPE,
+    Identifier.fromNamespaceAndPath("examplemod", "sin"),
+    SineFunction.CODEC
+);
+```
+
+Then, the `DensityFunction` can be registered or inlined:
+
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+// The resource key to register.
+public static final ResourceKey<DensityFunction> EXAMPLE_FUNCTION = ResourceKey.create(
+    Registries.DENSITY_FUNCTION,
+    Identifier.fromNamespaceAndPath("examplemod", "example_function")
+);
+
+builder.add(Registries.DENSITY_FUNCTION, bootstrap -> {
+    bootstrap.register(
+        EXAMPLE_FUNCTION,
+        // Our function.
+        new SineFunction(
+            new ConstantFunction(0)
+        )
+    );
+});
+```
+
+And the generated JSON:
+
+```json5
+// For some function.
+// In `data/examplemod/worldgen/density_function/example_function.json`
+{
+    // Our function.
+    "type": "examplemod:sin",
+    "input": 0
+}
+```
 
 ### Not a Surface, but a Material
 
@@ -3282,12 +3389,56 @@ And the generated JSON:
 
 ### Noisy Musical Chairs
 
-TODO
+The noise classes have been reworked into a more hierarchical structure, causing the majority of the classes to be either renamed or reimplemented. Now, all noise classes implement `Noise` interface, which defines the `range` of values, and two `get` methods to return a `float` at a given XY or XYZ coordinate. `Noise` has two types: `GradientNoise` and `NoiseStack`.
 
-The noise classes have functionally consumed each other with some classes taking the place of other classes
-It might be better to consider them all something to review
-NoiseParameters -> NormalNoise
-NormalNoise -> Noise
+`GradientNoise`, as the name implies, generates random gradients which are then inerpolated between using their dot product. Both `PerlinNoise` and `SimplexNoise` are a type of `GradientNoise`. `PerlinNoise` also has a `SmearedPerlinNoise` subtype (replaces `ImprovedNoise`), which fudges the Y scaling.
+
+`NoiseStack`, on the other hand, represents a layering of multiple different noise levels together. The original `PerlinSimplexNoise` impementation is best represented as a `NoiseStack` of `SimplexNoise` layers. The same applies to the original `PerlinNoise` as a `NoiseStack` of `PerlinNoise` layers.
+
+Additionally, `Registries#NOISE` that originally took in a `NormalNoise$NoiseParameters` now takes in a `NormalNoise`. However, the backing codec just simply remaps to the newly named `NormalNoise$Parameters`. Still, there are a number of additions.
+
+`amplitudes` was renamed to `amplitude_modifiers` while `firstOctave` was renamed to `base_octave`. There is also `ocatve_count`, which is the length of the `amplitude_modifiers`. `base_amplitude` represents the base amplitude of the noise value before the modifiers are applied. And finally, `normalize`, when `true`, normalizes the base amplitude based on the number of octaves.
+
+```java
+// For some RegistrySetBuilder builder to generate the datapack entries.
+
+// The resource key to register.
+public static final ResourceKey<NormalNoise> EXAMPLE_NOISE = ResourceKey.create(
+    Registries.NOISE,
+    Identifier.fromNamespaceAndPath("examplemod", "example_noise")
+);
+
+builder.add(Registries.NOISE, bootstrap -> {
+    bootstrap.register(
+        EXAMPLE_NOISE,
+        // The normal noise.
+        // Computes the base amplitude from the base octave
+        // and amplitude modifiers.
+        NormalNoise.createParity(-7, 0.4, 0.5, 1.0)
+    );
+});
+```
+
+And the generated JSON:
+
+```json5
+// For some noise.
+// In `data/examplemod/worldgen/noise/example_noise.json`
+{
+    // The normal noise.
+    // If the modifier list is all 1s, it can be excluded.
+    "amplitude_modifiers": [
+        0.4,
+        0.5,
+        1.0
+    ],
+    // Computed from the base octave and amplitude modifiers.
+    "base_amplitude": 0.8500634887071167,
+    "base_octave": -7,
+    // The number of octaves. Matches the number of modifiers.
+    "octave_count": 3
+}
+```
 
 - `net.minecraft.advancements`
     - `Advancement$Builder#display` -> `rootDisplay`, `Identifier` can no longer be null
