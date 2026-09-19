@@ -348,12 +348,55 @@ The render phases used by the `FeatureRenderDispatcher` have been partially reor
 
 Additionally, if improved transparency (OIT) is enabled, then `seeThrough`, `shadows`, `nameTags`, `texts`, `shapeOutlines`, `translucentBlocksAndItems`, `translucentModels`, `translucentCustomGeometry`, `breakingOverlay`, `afterTerrain`, and `translucentGizmos` all use `oitTranslucent`. This means that if you have a `SubmitNodeStorage` opted into OIT via `setUseImprovedTransparency`, you cannot use `FeatureRenderDispatcher#renderAllFeatures` as it will render the same phase elements multiple times.
 
-### Paletted Permutations Update
+### Palette Metadata
 
-TODO
+A new metadata section has been added to the PNG mcmeta for marking a texture as paletted, replacing the armor trims atlas. The section is denoted by a `palette` key, specifying the `base_palette` of the corresponding texture relative to `textures/palettes`.
 
-PNG metadata for this
-Also changes in trim definitions as well
+Textures making use of the palette section are handled through `PalettedTextureManager`, which dynamically constructs a texture containing the permutations for all palettes defined relative to `textures/palettes`. Note that this is only used for entity textures. Item textures still remain the same.
+
+```json5
+// For some PNG texture
+// In assets/examplemod/textures/trims/example_trim.png.mcmeta
+{
+    // The palette metadata section
+    "palette" : {
+        // Points to `assets/minecraft/textures/palettes/trim_base.png`
+        "base_palette" : "minecraft:trim_base"
+    }
+}
+```
+
+To actually make use of the paletted texture, it can be requested through `PalettedTextureManager#getOrPrepare`, passing in the base texture id along with the palette texture id. The identifier to the associated texture can then be obtained through the returned `PalettedTextureManager$Handle#textureLocation`, like `EquipmentLayerRenderer` does.
+
+The metadata section also changes how trim materials are defined and overridden. Now the `TrimMaterial` takes in a `palette_id` instead of an `asset_name`, pointing directly to the associated palette to use. The overrides are then specified on the `EquipmentClientInfo` through `trim_overrides`. Each override defines a `EquipmentClientInfo$TrimPredicate` indicating for what material and pattern the override should match, and the replacement texture and palette identifiers to use instead of the ones specified by the material and pattern.
+
+```json5
+// For some equipment assets.
+// In assets/examplemod/equipment/example.json
+{
+    // ...
+    "trim_overrides": [
+        {
+            "when": {
+                // When the trim material is diamond.
+                "material": "minecraft:diamond",
+                // And when the pattern is coast.
+                "pattern": "minecraft:coast"
+            },
+            // Use the overridden palette instead of the 
+            // one specified by the trim material.
+            // Points to `assets/minecraft/textures/palettes/trim/diamond_darker.png`
+            "palette": "minecraft:trim/diamond_darker",
+            // Use the overridden texture.
+            // How it resolves depends on use case.
+            // In `EquipmentLayerRenderer`, it overrides the
+            // trim pattern asset.
+            // Points to `assets/minecraft/textures/trims/entity/<layer>/snout.png`
+            "texture": "minecraft:snout"
+        }
+  ]
+}
+```
 
 ### Item Quads
 
