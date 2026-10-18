@@ -14,6 +14,36 @@ Thank you to:
 
 There are a number of user-facing changes that are part of vanilla which are not discussed below that may be relevant to modders. You can find a list of them on [Misode's version changelog](https://misode.github.io/versions/?id=26.4&tab=changelog).
 
+## Client Registries
+
+Vanilla has now formalized the concept of a registration system for client-only objects, similar to normal registration via `BuiltInRegistries`. The client registry keys are stored in `ClientRegistries`, while the registries themselves are in `BuiltInClientRegistries`. Currently, the registries supported are for `BlockEntityRendererProvider`, `DebugScreenEntry`, `EntityRendererProvider`, `MenuScreens$ScreenConstructor`, and `ParticleProvider`. They are registered using the same `Registry#register` methods.
+
+For `BlockEntityRendererProvider`, `EntityRendererProvider`, `MenuScreens$ScreenConstructor`, and `ParticleProvider`; the associated `ResourceKey` must have an `Identifier` that matches the associate `BlockEntityType`, `EntityType`, `MenuType`, or `ParticleType`; respectively. This is how the vanilla systems know to link the common and client registry objects.
+
+```java
+// An example using `MenuType` and `MenuScreens$ScreenConstructor`
+
+// Assume we have some `ExampleMenu` extends `AbstractContainerMenu`
+// Assume we have some `ExampleScreen` extends `AbstractContainerScreen`
+
+// The common registry object.
+public static final MenuType<ExampleMenu> EXAMPLE_MENU = Registry.register(
+    BuiltInRegistries.MENU,
+    // The registry object name.
+    Identifier.fromNamespaceAndPath("examplemod", "example_menu"),
+    // Note that the constructor is currently private and must be made public.
+    new MenuType<>(ExampleMenu::new, FeatureFlags.VANILLA_SET)
+);
+
+// The client registry object (in some other class).
+Registry.register(
+    BuiltInClientRegistries.MENU_SCREEN,
+    // The registry object name must match the menu type name exactly.
+    Identifier.fromNamespaceAndPath("examplemod", "example_menu"),
+    ExampleScreen::new
+);
+```
+
 ## Texture Handles and Providers
 
 The way textures are loaded and stored by the `TextureManager` has been rewritten. `AbstractTexture` and its subclass no longer exists. Instead, textures are generally loaded through a `TextureProvider` and then referenced through its loaded `TextureHandle`, splitting the previous implementation. The previous `AbstractTexture` subclasses have corollaries with the `TextureProvider` implementations, as storage remains quite uniform across the implementations.
@@ -121,6 +151,16 @@ new Block(
         .sound(ResourceKey.create(Registries.BLOCK_SOUND_SET, Identifier.fromNamespaceAndPath("examplemod", "example_sound")))
 );
 ```
+
+## Optional Sounds
+
+Most sound fields across the various datapack registry objects have been marked as `Optional`, meaning that if a sound is not specified, none will play.
+
+## A Singular Fluid
+
+Flowing and source fluids have been combined into a single `Fluid` instance. The source and flowing state are checked via `isSource`. `FlowingFluid` differentiates source and flowing through the `BlockStateProperties#SOURCE` boolean property. `isFalling` is also added for fluids flowing downwards due to gravity, which is handled by `BlockStateProperties#LEVEL_FLOWING` if the value is 8 and the fluid is not a source.
+
+Implementation-wise, this means that the `$Flowing` and `$Source` subclasses are no longer needed, along with `FlowingFluid#getFlowing()` and `getSource()`. As each fluid now represents all possible states, tag comparison is no longer necessary and can be done directly by comparing the `Fluid`s typically using the `FluidState` pass around.
 
 ## Debug Facts
 

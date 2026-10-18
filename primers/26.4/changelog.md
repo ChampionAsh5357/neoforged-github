@@ -26,8 +26,18 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `pathfinding/powder_snow`
     - `pathfinding/rails`
     - `pathfinding/sticky`
+    - `face_occluding_ice_blocks`
+    - `ice_crevasse_replaceables`
+- `minecraft:block`, `minecraft:item`
+    - `jukebox_containers`
 - `minecraft:block_sound_set`
     - `sounds_wooden`
+- `minecraft:damage_type`
+    - `no_hurt_sound`
+- `minecraft:entity_type`
+    - `does_not_break_brittle_ice`
+- `minecraft:fluid`
+    - `water`, `lava` marked as deprecated
 - `minecraft:item`
     - `sheep_wool_dyes`
     - `frostbite_preferred_weapons`
@@ -52,6 +62,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `NativeLibrariesBootstrap#isVulkanLoaderAvailable` -> `VulkanBackend#isVulkanLoaderAvailable`, now `private` from `public`
     - `Window` constructor now takes in the `GpuDevice` and requires the `int` maximum window size
         - `isWayland` - If the display protocol uses Wayland.
+        - `show` - Shows and syncs the window associated with the stored handle.
 - `com.mojang.blaze3d.systems`
     - `RenderSystem`
         - `MINIMUM_ATLAS_TEXTURE_SIZE` -> `GlHeuristics#MINIMUM_SUPPORTED_MAX_TEXTURE_SIZE`
@@ -220,6 +231,10 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `DEBUG_ORE_VEINS`, `DEBUG_DISABLE_ORE_VEINS` are removed
     - `DEBUG_AQUIFERS`
     - `DEBUG_LARGE_DRIPSTONE` -> `DEBUG_LARGE_SPELEOTHEM`
+    - `DEBUG_SUBTITLES` is removed
+- `net.minecraft.advancements.predicate.StatePropertiesPredicate`
+    - `EMPTY` - An empty properties predicate that always returns true.
+    - `$Builder#build` now returns the raw `StatePropertiesPredicate` instead of an optional-wrapped value.
 - `net.minecraft.client`
     - `Camera`
         - `getFogType` - Gets the fog type occluding the camera view.
@@ -239,11 +254,16 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `Options#keySocialInteractions` -> `keyOtherPlayers`
     - `PresenceSharing#getSprites` - Returns the sprites used for each presence setting.
 - `net.minecraft.client.color.ColorLerper#MUSIC_NOTE_COLORS` -> `MUSIC_NOTE_DYES`
+- `net.minecraft.client.core.registries`
+    - `BuiltInClientRegistries` - The client vanilla registries.
+    - `ClientRegistries` - The identifiers for the client vanilla registries.
 - `net.minecraft.client.data.models.BlockModelGenerators`
     - `Z_ROT_180` - A mutator that rotates the model 180 degrees around the Z axis.
     - `createAmethystCluster` -> `createCrystalCluster`
     - `createIceCrystal` - Creates the model for the ice crystal.
     - `createIcicle` - Creates the model for the icicle.
+    - `createFrostedIce` -> `createCrackingIce`, now taking in the associated `Block`
+    - `createBrittleIce` - Creates the model for brittle ice.
 - `net.minecraft.client.data.models.model.ModelTemplates#ICICLE`, `ICICLE_BASE` - Templates for the icicle block.
 - `net.minecraft.client.gui.components`
     - `AbstractCycleButton` - An abstract class for creating a button that can cycle through some values.
@@ -256,6 +276,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - All fields are now `protected` from `private`
         - All methods now return the generic instead of the builder instance
         - `tooltip` now has an overload that takes in a `Component`
+    - `CommandSuggestions#mouseClicked` now takes in the `MouseButtonEvent` instead of the `int` XY location
     - `CycleButton` has been split into `CycleButton` and `AbstractCycleButton`
         - `CycleButton` now extends `AbstractCycleButton`
         - The constructor no longer takes in the `Component` message
@@ -265,7 +286,9 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `$OnValueChange` -> `AbstractCycleButton$OnValueChange`
         - `$ValueListSupplier` -> `AbstractCycleButton$ValueListSupplier`
     - `DebugScreenOverlay#clearColumnCache` - Clears the contents of the debug columns displayed on the sides of the window.
-    - `EditBox#isVisible`, `setVisible` -> `AbstractWidget#isVisible`, `setVisible`
+    - `EditBox`
+        - `isVisible`, `setVisible` -> `AbstractWidget#isVisible`, `setVisible`
+        - `setMaxWidth` - Sets the maximum width of the edit box.
     - `FriendsButton` now extends `SpriteIconButton`
     - `LoadingButton` - A button that displays a sprite, displaying a loading icon after press if set.
     - `PlainTextButton` now has an overload that takes in `$CreateNarration`
@@ -312,6 +335,12 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `addToGroup` now takes in a `DebugGroup` instead of an `Identifier`
             - There is also an overload that takes in a `DebugCustomRenderer`
         - `addFactToGroup` - Adds a `DebugFact` to the provided group.
+    - `DebugScreenEntries`
+        - `Identifier` constants are now all `ResourceKey`s
+        - `allEntries` replaced by `Registry#entrySet`
+        - `getEntry` replaced by `Registry#getValue`
+        - `bootstrap` - Registers the vanilla debug screen entries.
+    - `DebugScreenEntryList#getStatus`, `isCurrentlyEnabled`, `setStatus`, `toggleStatus`, `getCurrentlyEnabled` now deal with `ResourceKey`s instead of `Identifier`s
 - `net.minecraft.client.gui.components.tabs`
     - `GridLayoutTab` no longer takes in the title `Component`
     - `LoadingTab` no longer takes in the title `Component`
@@ -322,20 +351,26 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `$MenuTabButton` now takes in the label `Component`
             - `renderMenuBackground` -> `extractMenuBackground`
     - `Tab#getTabTitle` is removed
-- `net.minecraft.client.gui.font.FontTexture` no longer extends `AbstractTexture` and implements `Dumpable`, instead implementing `AutoCloseable`
-    - The constructor now takes in the `TexutureManager` and texture `Identifier` instead of the supplied `String` label
+- `net.minecraft.client.gui.font`
+    - `FontTexture` no longer extends `AbstractTexture` and implements `Dumpable`, instead implementing `AutoCloseable`
+        - The constructor now takes in the `TexutureManager` and texture `Identifier` instead of the supplied `String` label
+    - `TextFieldHelper` is removed
 - `net.minecraft.client.gui.layouts.HeaderAndFooterLayout`
     - `CONTENT_MARGIN_TOP` -> `DEFAULT_CONTENT_MARGIN_TOP`, now `public` from `private`
     - `setContentMarginTop` - Sets the top margin for the content.
 - `net.minecraft.client.gui.navigation.ScreenRectangle#expandInAllDirections` - Inflates the rectangle by the specified amount.
 - `net.minecraft.client.gui.screens`
     - `LevelLoadingScreen#extractChunksForRendering` now takes a `boolean` for whether to show where the chunk center is
+    - `MenuScreens`
+        - `bootstrap` - Registers the vanilla menu screens.
+        - `$ScreenConstructor` is now `public` from `private`
     - `PauseScreen`
         - `OTHER_PLAYERS_SPRITE` - Sprite for the other players button.
         - `DRAFT_REPORT_TOOLTIP` - Tooltip for drafting a report.
     - `Screen`
         - `isInitialized` - Whether the screen has been initialized.
         - `extractListSeparators` - Blits the header and footer separators for some layout.
+- `net.minecraft.client.gui.screens.debug.DebugOptionsScreen$OptionEntry` now takes in a `ResourceKey` instead of an `Identifier`
 - `net.minecraft.client.gui.screens.friends`
     - `AbstractFriendsEntryContainerWidget` class is now `public` from package-private
         - The constructor now only takes in the `Minecraft` instance, the `int` width, the player `UUID`, and the player's `String` name
@@ -407,7 +442,13 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `isQuickCrafting` is now `private` from `protected`
         - `hasClickedOutside` no longer takes in the origin XY `int`s
         - `updateLastQuickMoved` - Sets the last quick moved `ItemStack` using the provided `Slot`.
+    - `AbstractSignEditScreen`
+        - `getSignTextScale` replaced by `getSignTextSpacing`, not one-to-one
+        - `getSignYOffset` replaced by `getSignTextYOffset`, now returning an `int` instead of a `float`, not one-to-one
+    - `HangingSignEditScreen#MAGIC_BACKGROUND_SCALE` is now `private` from `public`
     - `InventoryScreen#extractEntityInInventoryFollowsMouse` -> `EntityPortraitWidget#extractEntityInInventoryFollowsMouse`, the size a `float` instead of an `int`, and an `Entity` instead of a `LivingEntity`
+    - `JukeboxScreen` - The screen for displaying the jukebox playlist.
+    - `SignEditScreen#MAGIC_BACKGROUND_SCALE` is now `private` from `public`
 - `net.minecraft.client.gui.screens.reporting`
     - `AbstractReportScreen$DiscardReportWarningScreen` -> `DiscardReportWarningScreen`, not one-to-one
     - `DraftIconButton` - Icon button for drafting a report.
@@ -440,7 +481,14 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `SEARCH_START`, `LIST_START` are removed
         - `refreshLists` - Refreshes the contents on the screen.
         - `$Page#HIDDEN` -> `MUTED`
-- `net.minecraft.client.input.InputQuirks#SHIFT_INVERTS_SCROLL_AXIS` is removed
+- `net.minecraft.client.input`
+    - `InputQuirks#SHIFT_INVERTS_SCROLL_AXIS` is removed
+    - `MouseButtonEvent`, `MouseButtonInfo`
+        - `isLeftMouse` - If the left mouse button was pressed.
+        - `isMiddleMouse` - If the middle (scroll click) mouse button was pressed.
+        - `isRightMouse` - If the right mouse button was pressed.
+        - `isMouse4` - If the fourth (typically back) mouse button was pressed.
+        - `isMouse5` - If the fifth (typically foward) mouse button was pressed.
 - `net.minecraft.client.model`
     - `ArmorStandModelTransformer` - A mesh transformer for an armor stand and its model variants.
     - `BabyModelTransform` record is removed
@@ -476,6 +524,10 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
 - `net.minecraft.client.particle`
     - `BreakingItemParticle$SnowballProvider` is removed
     - `FreezingParticle` - A particle for indicating the entity is freezing.
+    - `ParticleResources`
+        - `registerProviders` replaced with `bootstrap`
+        - `getProviders` replaced with `Registry#entrySet`
+        - `getProvider` - Gets the provider associated with some `ParticleOptions`.
 - `net.minecraft.client.player.LocalPlayer#getRidingSoundId` - An identifier representing the riding sound that should be playing.
 - `net.minecraft.client.renderer`
     - `BindGroupLayouts`
@@ -525,6 +577,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `DARK_TEXT_COLORS` - The colors to use if the sign does not have glowing text.
         - `getDarkColor` replaced by `DARK_TEXT_COLORS`
     - `BannerRenderer#DYED_PATTERN_COLOR` - The diffuse color to apply for the pattern layer.
+    - `BlockEntityRenderers#bootstrap` - Registries the vanilla block entity renderers.
 - `net.minecraft.client.renderer.chunk`
     - `ChunkSectionLayer#pipeline` now takes in a `boolean` for whether to use the improved fog pipelines
     - `ChunkSectionsToRender`
@@ -535,8 +588,19 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `SectionRenderDispatcher`
         - `getStats` is removed
         - `$RenderSection#hasCompileTaskScheduled` - Whether the compile task has been scheduled for this section.
+        - `$SectionTask`
+            - `isCancelled`, `isCompleted` are now volatile `boolean`s instead of `AtomicBoolean`s
+            - `runTask` - Runs the task on the provided buffers.
+            - `doTask` is now `protected` from `public`
+            - `cancel` replaced by `complete`
+                - New `cancel` method now sets `isCancelled` to `true`
 - `net.minecraft.client.renderer.debug.PathfindingRenderer#renderPath` now takes in an `int` for how many ticks remain until the next stuck detection check
-- `net.minecraft.client.renderer.entity.FrostbiteRenderer` - The renderer for the frostbite entity.
+- `net.minecraft.client.renderer.entity`
+    - `EntityRenderers`
+        - `bootstrap` - Registers all vanilla entity renderers.
+        - `validateRegistrations` split into `validateRegistrations` and `collectMissingEntityRenderers`
+        - `collectMissingEntityRenderers` - Gets the list of entity renderer ids that are not present for an entity type.
+    - `FrostbiteRenderer` - The renderer for the frostbite entity.
 - `net.minecraft.client.renderer.entity.layers`
     - `EquipmentLayerRenderer#renderLayers` now returns an `int` for the last order used by the rendering equipment.
     - `FrostbiteOuterLayer` - Renders the outer layer of the frostbite entity.
@@ -582,16 +646,44 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
 - `net.minecraft.client.resources.model.sprite.AtlasManager`
     - `tick` - Ticks the animations in the atlas.
     - `dumpAllSprites` - Dumps all sprites to the provided directory.
-- `net.minecraft.client.resources.sounds.RidingEntitySoundInstance`, `RidingMinecartSoundInstance` now take in the `LocalPlayer` instead of the `Player`, and an `int` for the identifier of the riding sound
-- `net.minecraft.client.sounds`
-    - `SoundEngine#getChannelDebugString` now takes in a `DebugFact`, no longer returning anything
-    - `SoundManager#getChannelDebugString` -> `fillChannelDebug`, now taking in a `DebugFact`, no longer returning anything
+- `net.minecraft.client.resources.sounds`
+    - `RidingEntitySoundInstance`, `RidingMinecartSoundInstance` now take in the `LocalPlayer` instead of the `Player`, and an `int` for the identifier of the riding sound
     - `SimpleSoundInstance` now has an overload that takes in a `Holder<SoundEvent>`
-- `net.minecraft.core.Direction#BY_ID` is removed, replaced by `EnumStreamCodec#byId`
+        - `forUI` - Constructs a sound instance for a user interface.
+    - `SoundEventRegistration#getSubtitle` now returns a `Component` instead of a `String`
+    - `SoundInstance`
+        - `getOrResolve` replaced by `resolveAndSelectSound`, now returning a `boolean` instead of the `WeighedSoundEvents`
+        - `getSound`, `getSoundEvent` are no longer nullable
+- `net.minecraft.client.sounds`
+    - `SoundEngine`
+        - `MISSING_SOUND` is removed
+        - `getChannelDebugString` now takes in a `DebugFact`, no longer returning anything
+    - `SoundManager`
+        - `EMPTY_SOUND_LOCATION`, `EMPTY_SOUND`, `INTENTIONALLY_EMPTY_SOUND_LOCATION`, `INTENTIONALLY_EMPTY_SOUND_EVENT`, `INTENTIONALLY_EMPTY_SOUND` are removed
+        - `getChannelDebugString` -> `fillChannelDebug`, now taking in a `DebugFact`, no longer returning anything
+    - `WeighedSoundEvents` now takes in a `Component` for the subtitle instead of a `String`, and no longer takes in the `Identifier`
+    - `Weighted#getSound` is now nullable
+- `net.minecraft.core`
+    - `BlockPos` is no longer annotated with `@Immutable`
+    - `Direction#BY_ID` is removed, replaced by `EnumStreamCodec#byId`
+    - `Registry#holders` - An iterable of the registered holder references.
+    - `Vec3i` is no longer annotated with `@Immutable`
+- `net.minecraft.core.component.BlockTransformer$BlockTransformData#sound` is now `Optional`-wrapped
 - `net.minecraft.core.particles.ParticleTypes`
     - `ITEM_SNOWBALL` is removed
     - `FREEZING` - Particles emitted by entities affected by the freezing effect.
 - `net.minecraft.core.registries`
+    - `BuiltInRegistries`
+        - `registerSimple` -> `BuiltinRegistryBuilder#registerSimple`, now `public` from `private`
+        - `registerSimpleWithIntrusiveHolders` -> `BuiltinRegistryBuilder#registerSimpleWithIntrusiveHolders`, now `public` from `private`
+        - `registerDefaulted` -> `BuiltinRegistryBuilder#registerDefaulted`, now `public` from `private`
+        - `registerDefaultedWithIntrusiveHolders` -> `BuiltinRegistryBuilder#registerDefaultedWithIntrusiveHolders`, now `public` from `private`
+        - `internalRegister` -> `BuiltinRegistryBuilder#internalRegister`, now `public` from `private`
+        - `bootStrap` -> `BuiltinRegistryBuilder#bootStrap`
+            - Original `bootStrap` method still exists, which calls the builder bootstrap
+        - `acquireBootstrapRegistrationLookup` is removed
+        - `$RegistryBootstrap` -> `BuiltinRegistryBuilder$RegistryBootstrap`, now `public` from `private`
+    - `BuiltinRegistryBuilder` - A builder for creating a registry set.
     - `BuiltInRegistries`, `Registries#RULE_TEST_TYPE` is now a registry of `MapCodec`s instead of `RuleTestType`s
     - `Registries#BLOCK_SOUND_SET` - Registry key for the `BlockSoundSet` world datapack registry.
 - `net.minecraft.data.tags.BlockSoundSetTagsProvider` - Tag provider for block sound sets.
@@ -599,27 +691,50 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `addDefaultUndergroundVariety` now takes in `boolean`s for if it has glow lichen or dirt and granite
     - `addIceCaveOres`, `addIceCaveUndergroundVariety`, `addIceCavesFeatures` - Features for the ice caves.
 - `net.minecraft.data.worldgen.biome.OverworldBiomes#iceCaves` - Ice cave biome.
+- `net.minecraft.gizmos`
+    - `GizmoProperties#withEntityHitboxes` - Whether the gizmo should be rendered when the debug entity hitboxes are on.
+    - `SimpleGizmoCollector$GizmoInstance#isWithEntityHitboxes` - If the gizmo should be rendered when the debug entity hitboxes are on.
 - `net.minecraft.network`
     - `Connection`
+        - `PACKET_HANDLER_ERROR_DISCONNECT_REASON` - The display message for disconnect due to a packet handler error.
         - `initiateServerboundStatusConnection` now takes in the `ServerConnectionDetails` instead of the hostname `String` and `int` port
         - `initiateServerboundPlayConnection` now takes in the `ServerConnectionDetails` instead of the hostname `String` and `int` port
         - `$ClientboundDisconnectPacketType` - The type of disconnect packet to send.
+    - `PacketListener#onPacketError` -> `PacketProcessor$Handler#onPacketError`
+    - `PacketProcessor`
+        - `scheduleIfPossible` generic must now also be a subtype of `$Handler`
+        - `$Handler` - A packet handler for if an error occurs.
     - `QueryProperties` - The query parameters for an HTTP request.
     - `ServerConnectionDetails` - The common details used to make a server connection.
 - `net.minecraft.network.codec`
     - `ByteBufCodecs#idMapper` replaced by `enumCodec`, `sparseEnumCodec`
     - `EnumStreamCodec` - A network codec that syncs an enum.
-- `net.minecraft.network.protocol.common.ClientboundTransferPacket` now takes in a map of query properties
+- `net.minecraft.network.protocol.PacketUtils#ensureRunningOnSameThread` generic must also be a subtype of `PacketProcessor$Handler`
+- `net.minecraft.network.protocol.common`
+    - `ClientboundTransferPacket` now takes in a map of query properties
+    - `ClientCommonPacketListener` now implements `PacketProcessor$Handler`
+    - `ServerCommonPacketListener` now implements `PacketProcessor$Handler`
 - `net.minecraft.network.protocol.common.custom`
     - `ModListPayload` - A payload intended to inform servers about client mods.
     - `PropertyMap` - A map of identifiers to strings, with a max size of 32 elements.
+- `net.minecraft.network.protocol.cookie.ServerCookiePacketListener` now extends `ServerboundPacketListener`
 - `net.minecraft.network.protocol.game`
+    - `ClientboundExplodePacket`
+        - `explosionParticle`, `explosionSound` are now `Optional`-wrapped
+        - `playSound` is removed
     - `ClientboundTrackedWaypointPacket$Operation#BY_ID` is removed, replaced by `EnumStreamCodec#byId`
     - `CommonPlayerSpawnInfo` no longer takes in the `long` seed
-- `net.minecraft.network.protocol.handshake.ClientIntent`
-    - `STREAM_CODEC` - The network codec.
-    - `byId`, `id` are now `private` from `public`
-- `net.minecraft.network.protocol.status.ServerStatus` now takes in an optional `String` for the contact details of the server
+    - `ServerboundSignUpdatePacket#MAX_STRING_LENGTH` is now `public` from `private`
+    - `ServerPacketListener` is removed
+- `net.minecraft.network.protocol.handshake`
+    - `ClientIntent`
+        - `STREAM_CODEC` - The network codec.
+        - `byId`, `id` are now `private` from `public`
+    - `ServerHandshakePacketListener` now extends `ServerboundPacketListener`
+- `net.minecraft.network.protocol.status`
+    - `ServerStatus` now takes in an optional `String` for the contact details of the server
+    - `ServerStatusPacketListener` now extends `ServerboundPacketListener`
+- `net.minecraft.resources.ResourceKey#createRegistryKey` now has an overload that takes in two `Identifier`s
 - `net.minecraft.server`
     - `MinecraftServer`
         - `enableLegacyStatus` - When `false`, disables pre-1.7 server status and ping protocol handles.
@@ -646,7 +761,13 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
 - `net.minecraft.server.packs`
     - `DownloadCacheCleaner` -> `net.minecraft.client.resources.server.DownloadCacheCleaner`
     - `DownloadQueue` -> `net.minecraft.client.resources.server.DownloadQueue`
-- `net.minecraft.sounds.SoundEvents` fields used for block sounds are now `Holder<SoundEvent>`s
+- `net.minecraft.server.packs.repository.PackDetector#detectPackResources` no longer takes in a list of `ForbiddenSymlinkInfo`, instead potentially throwing a `ContentValidationException`
+- `net.minecraft.sounds.SoundEvents`
+    - Fields used for common block sounds are now `BlockSoundCollection`s
+    - `CAT_*_BABY` merged into `BABY_CAT_SOUND_SET`
+    - `CHICKEN_*_BABY` merged into `BABY_CHICKEN_SOUND_SET`
+    - `PIG_*_BABY` merged into `BABY_PIG_SOUND_SET`
+    - `WOLF_*_BABY` merged into `BABY_WOLF_SOUND_SET`
 - `net.minecraft.util`
     - `CommonColors#TEXTURE_TINT_COLORS` - The texture tint colors.
     - `CubicSpline$Multipoint#mapCoordinates` now returns a `$Multipoint`
@@ -658,6 +779,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `isAarch64` -> `PlatformUtil#IS_AARCH64`
         - `isAppleSiliconMac` -> `PlatformUtil#isAppleSiliconMac`
 - `net.minecraft.util.debug.DebugPathInfo` now takes in an `int` for how many ticks remain until the next stuck detection check
+- `net.minecraft.world.DifficultyInstance` is no longer annotated with `@Immutable`
 - `net.minecraft.world.attribute`
     - `EnvironmentAttribute#isFullResolutionBiomes`, `$Builder#fullResolutionBiomes` are removed
     - `GaussianSampler`
@@ -672,15 +794,21 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `freezeForTicks` - Freezes an entity for the provided number of ticks.
     - `EquipmentSlot#BY_ID` is removed, replaced by `EnumStreamCodec#byId`
     - `EquipmentSlotGroup#BY_ID` is removed, replaced by `EnumStreamCodec#byId`
+    - `ItemSteerable` now extends `Saddleable`
     - `LivingEntity`
-        - `lastDamageSource` is now `protected` from `private`
         - `jumpOutOfFluid` is now `protected` from `private`
         - `removeFrost`, `tryAddFrost` are removed
+        - `getEquipSound` is now `final`, no longer taking in the `ItemStack`
+        - `setLastDamageSource` - Sets the last damage source taken.
     - `MobCategory#getDebugAbbreviation` replaced by `getDebugName`
     - `Pose#BY_ID` is removed, replaced by `EnumStreamCodec#byId`
     - `PositionPath$Type`
         - `BY_ID` is removed, replaced by `EnumStreamCodec#byId`
         - `getId` - The identifier of the type.
+    - `Saddleable` - An interface that marks an entity can have a saddle put on it.
+    - `SulfurCubeArchetype`
+        - `DEFAULT_KNOCKBACK_MODIFIERS`, `DEFAULT_SOUND_SETTINGS` are now `final`
+        - `$SoundSettings#hitSound`, `pushSound` are now `Optional`-wrapped
 - `net.minecraft.world.entity.ai.attributes.AttributeModifier$Operation#BY_ID` is removed, replaced by `EnumStreamCodec#byId`
 - `net.minecraft.world.entity.ai.goal`
     - `MeleeAttackGoal` now has an overload that specifies the `int` attack interval in ticks
@@ -696,21 +824,41 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `PoiType`
         - `ResourceKey`s moved to `PoiTypeIds`
         - All vanilla `PoiType`s are now `Holder`-wrapped constants
+- `net.minecraft.world.entity.animal.AgeableSoundVariant` - An interface that marks some entity sound variant implementation to have different sounds depending on whether the animal is a baby or adult.
 - `net.minecraft.world.entity.animal.axolotl.Axolotl$Variant#STREAM_CODEC` is now an `EnumStreamCodec`
-- `net.minecraft.world.entity.animal.cow.MushroomCow$Variant#STREAM_CODEC` is now an `EnumStreamCodec`
+- `net.minecraft.world.entity.animal.camel.Camel#getSaddleSound` replaced by `Saddleable#getSaddleEquipSound`
+- `net.minecraft.world.entity.animal.chicken.ChickenSoundVariant` now implements `AgeableSoundVariant`
+    - `NETWORK_CODEC` is removed
+    - `$ChickenSoundSet` sound fields are now `Optional`-wrapped
+- `net.minecraft.world.entity.animal.cow`
+    - `CowSoundVariant`
+        - `NETWORK_CODEC` is removed
+        - Sound fields are now `Optional`-wrapped
+    - `MushroomCow$Variant#STREAM_CODEC` is now an `EnumStreamCodec`
 - `net.minecraft.world.entity.animal.equine`
-    - `AbstractHorse#playGallopSound` now takes in a `BloudSoundSet` instead of a `SoundType`
+    - `AbstractHorse` now implements `Saddleable`
+        - `playGallopSound` now takes in a `BloudSoundSet` instead of a `SoundType`
     - `Llama$Variant#STREAM_CODEC` is now an `EnumStreamCodec`
     - `Variant#STREAM_CODEC` is now an `EnumStreamCodec`
+- `net.minecraft.world.entity.animal.feline.CatSoundVariant` now implements `AgeableSoundVariant`
+    - `NETWORK_CODEC` is removed
+    - `$CatSoundSet` sound fields are now `Optional`-wrapped
 - `net.minecraft.world.entity.animal.fish`
     - `Salmon$Variant`
         - `STREAM_CODEC` is now an `EnumStreamCodec`
         - `byId` - Gets the salmon variant by its id.
     - `TropicalFish$Variant#STREAM_CODEC` is now an `EnumStreamCodec`
 - `net.minecraft.world.entity.animal.fox.Fox$Variant#STREAM_CODEC` is now an `EnumStreamCodec`
-- `net.minecraft.world.entity.animal.nautilus.AbstractNautilus#getRidingSound` - The sound to play when riding a nautilus.
+- `net.minecraft.world.entity.animal.nautilus.AbstractNautilus` now implements `Saddleable`
+    - `getRidingSound` - The sound to play when riding a nautilus.
 - `net.minecraft.world.entity.animal.parrot.Parrot$Variant#STREAM_CODEC` is now an `EnumStreamCodec`
+- `net.minecraft.world.entity.animal.pig.PigSoundVariant` now implements `AgeableSoundVariant`
+    - `NETWORK_CODEC` is removed
+    - `$PigSoundSet` sound fields are now `Optional`-wrapped
 - `net.minecraft.world.entity.animal.rabbit.Rabbit$Variant#STREAM_CODEC` is now an `EnumStreamCodec`
+- `net.minecraft.world.entity.animal.wolf.WolfSoundVariant` now implements `AgeableSoundVariant`
+    - `NETWORK_CODEC` is removed
+    - `$WolfSoundSet` sound fields are now `Optional`-wrapped
 - `net.minecraft.world.entity.decoration`
     - `ArmorStand#kill(ServerLevel, Entity)` -> `kill(ServerLevel, DamageSource)`
     - `BlockAttachedEntity`
@@ -727,6 +875,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `convertsWhenFreezing` - Whether the entity can convert to a frostbite while freezing.
         - `convertsToWhenFreezing` - The entity the zombie converts to after freezing (i.e., frostbite).
         - `getFreezingConversionSound` - The level event to run on freeze conversion.
+        - `isFreezingConverting` - If the zombie is currently converting to another entity due to freezing.
 - `net.minecraft.world.entity.player`
     - `ChatVisibility#STREAM_CODEC` is now an `EnumStreamCodec`
     - `Plater`
@@ -737,7 +886,9 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `IceBall` - The ice ball entity.
     - `Snowball` now extends `ThrowableBallProjectile`
     - `ThrowableBallProjectile` - An throwable ball-like item projectile entity.
+- `net.minecraft.world.inventory.JukeboxMenu` - A chest menu for showing the music discs being played.
 - `net.minecraft.world.item`
+    - `ArmorStandItem#playSound` - Plays the armor stand placement sound.
     - `BlockItem#getPlaceSound` now takes in a `BlockSoundSet` instead of a `BlockState`, returning a `Holder`-wrapped `SoundEvent`
     - `DyeColor`
         - `getTextureDiffuseColor` replaced by `CommonColors#TEXTURE_TINT_COLORS` and other references depending on the object
@@ -745,7 +896,10 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `getTerracottaColor` replaced by `MapColor#DYE_TO_TERRACOTTA_COLOR`
         - `getFireworkColor`, `byFireworkColor` replaced by `FireworkExplosion#DEFAULT_COLOR_TINTS`
         - `getTextColor` replaced by `AbstractSignRenderer#BRIGHT_TEXT_COLORS` or `DARK_TEXT_COLORS`
+    - `FireChargeItem#playSound` is now `public` and static
+    - `FlintAndSteelItem#playSound` - Plays the flint and steel use sound.
     - `IceBallItem` - The ice ball item.
+    - `JukeboxSongPlayer` now takes in a `BooleanSupplier` for whether the spawned particles should be placed one block higher than normal.
     - `PlaceOnWaterBlockItem` -> `PlaceOnFluidBlockItem`
     - `SolidBucketItem` now takes in a `Holder`-wrapped `SoundEvent` instead of the raw value
 - `net.minecraft.world.item.component`
@@ -753,11 +907,16 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `DEFAULT_COLOR_TINTS`, `defaultFireworkTint` - Handles the firework color collection for a dye.
         - `$Shape#byId` is removed
     - `MapPostProcessing#ID_MAP` is removed
+- `net.minecraft.world.item.enchantment.effects.ExplodeEffect#smallParticle`, `largeParticle`, `sound` are now `Optional`-wrapped
 - `net.minecraft.world.level`
+    - `CollisionGetter`
+        - `noCollision` now has overloads that takes in the `double` XZ position instead of the nullable `Entity`
+        - `noBorderCollision` now has overloads that takes in the `double` XZ position instead of the nullable `Entity`
     - `GameType#STREAM_CODEC` is now an `EnumStreamCodec`
     - `Level` no longer takes in the `long` biome zoom seed
         - `gatherChunkSourceStats` is removed
         - `playLocalSound` now has overloads that take in a `Holder`-wrapped `SoundEvent`
+        - `explode` can now take in nullable `ParticleOptions` and `Holder`-wrapped `SoundEvent` for the explosion sound
     - `LevelAccessor#playSound` now has an overload that takes in a `Holder`-wrapped `SoundEvent`
     - `LevelReader`
         - `getBiomeManager` is removed
@@ -808,10 +967,23 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `Block`
         - `BLOCK_STATE_REGISTRY_STREAM_CODEC` - The network codec for the block state registry.
         - `getDrops(BlockState, ServerLevel, BlockPos, BlockEntity)` is removed
+    - `BrittleIceBlock` - The brittle ice block.
     - `CalibratedSculkSensorBlock` now takes in an `IntProvider` for the XP range
+    - `CrackingIceBlock` - The cracking ice block.
     - `DropExperienceEntityBlock` - A block with a block entity that drops experience after breaking.
+    - `FallingParticlesLeavesBlock` now takes in an `Optional`-wrapped `AmbientLeavesBlockSoundPlayer` instead of the raw value
+    - `FrogspawnBlock#supportsFrogSpawn` - Whether the block at the position can support frog spawns.
+    - `FrostedIceBlock` now extends `CrackingIceBlock`
+        - `MAX_AGE`, `AGE` -> `CrackingIceBlock#MAX_AGE`, `AGE`
+        - `shouldEnvironmentIncreaseCracking` - If the environment should cause the block to crack faster.
+    - `IceBlock#meltsInto` is no longer static
     - `IceCrystalBlock` - The ice crystal block.
     - `IcicleBlock` - The icicle block.
+    - `JukeboxBlock#PLAYLIST_MODE` - Whether the jukebox is reading the discs from a playlist.
+    - `LeavesBlock` now takes in an `Optional`-wrapped `AmbientLeavesBlockSoundPlayer` instead of the raw value
+        - `ambientLeavesBlockSoundPlayer` is now `Optional`-wrapped
+    - `LiquidBlock#shouldBubbleColumnOccupy` is now `public` from `private`
+    - `LiquidBlockContainer#canPlaceLiquid` now takes in a `FluidState` instead of a `Fluid`
     - `MushroomBlock#canSpreadTo` - Whether the mushroom can spread to the given position.
     - `RedStoneOreBlock` now extends `DropExperienceBlock`
         - The constructor now takes in an `IntProvider` for the XP range
@@ -832,12 +1004,27 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `shouldMergeTips` - Whether the tips of two speleothems can merge together.
         - `spawnDripParticle`, `getDripParticle` - Handles the drip particle based on the surrounding environment.
         - `fallOnDamage` - Damage to apply to an entity when colliding with the speleothem after falling.
+    - `UntintedParticleLeavesBlock` now takes in an `Optional`-wrapped `AmbientLeavesBlockSoundPlayer` instead of the raw value
     - `WeatheringCopper$WeatherState`
         - `BY_ID` is removed, replaced by `EnumStreamCodec#byId`
         - `STREAM_CODEC` is now an `EnumStreamCodec`
         - `getId` - The identifier of the weather state.
-- `net.minecraft.world.level.block.entity.TestInstanceBlockEntity$Status#byIndex` is removed
+- `net.minecraft.world.level.block.entity`
+    - `JukeboxBlockEntity`
+        - `PLAYLIST_POSITION`, `DATA_PLAYLIST_POS`, `NUM_DATA`, `NO_PLAYLIST_POS` - Constants for managing a jukebox playing from a playlist.
+        - `dataAccess` - The synced container data of the jukebox.
+        - `tick` split into `tickWithRecord`, `tickWithoutRecord`
+            - Original is `tickWithRecord`
+        - `tickWithoutRecord` - Ticks the jukebox under the assumption that it is running a playlist from a different block.
+        - `isInPlaylistMode` - If the jukebox is playing from a playlist.
+        - `findNextPlayListPosition` - Finds the next inventory position to play the music disc of.
+        - `createMenu` - Creates the menu showing the jukebox playlist.
+    - `TestInstanceBlockEntity$Status#byIndex` is removed
 - `net.minecraft.world.level.block.sounds`
+    - `AmbientLeavesBlockSoundPlayer`
+        - `ambientSound` is now `Optional`-wrapped
+        - `noAmbientSound` is removed
+    - `BlockSoundCollection` - A collection of sounds to play when commonly interacting with a block.
     - `BlockSoundSet` - The sounds to play when commonly interacting with a block.
     - `BlockSoundSets` - All vanilla block sounds.
 - `net.minecraft.world.level.block.state.BlockBehaviour`
@@ -851,9 +1038,14 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `noSound` - No sound should be played by this block.
 - `net.minecraft.world.level.block.state.properties`
     - `BlockSetType#soundType` replaced by `blockSoundSet`, now a `ResourceKey`
+    - `BlockStateProperties`
+        - `FALLING` is removed
+        - `PLAYLIST_MODE` - If the jukebox is in playlist mode.
+        - `SOURCE` - Whether the fluid is a source block.
     - `WoodType`
         - `soundType` replaced by `blockSoundSet`, now a `ResourceKey`
         - `hangingSignSoundType` replaced by `hangingSignSoundSet`, now a `ResourceKey`
+- `net.minecraft.world.level.border.WorldBorder#isInsideCloseToBorder` now has an overload that takes in the `double` XZ position instead of the `Entity`
 - `net.minecraft.world.level.chunk`
     - `CarvingMask`
         - `visit`, `$Visitor` are removed
@@ -937,7 +1129,14 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `$RelativeToSeaLevel` replaced by `$Type#RELATIVE_TO_SEA_LEVEL`
     - `WorldGenerationContext` -> `VerticalAnchor$Context`
         - `of` -> `from`
-- `net.minecraft.world.level.levelgen.blockpredicates.BelowHeightmapPredicate`, `BlockPredicate#belowHeightmap` - A predicate that checks whether the block origin's Y is below the given heightmap Y.
+- `net.minecraft.world.level.levelgen.blockpredicates`
+    - `BelowHeightmapPredicate`, `BlockPredicate#belowHeightmap` - A predicate that checks whether the block origin's Y is below the given heightmap Y.
+    - `BlockPredicate`
+        - `FLUID_SOURCE_BLOCK` - Whether the fluid has the source property set to true.
+        - `ANY_FLUID_STATE` - Matches any fluid state.
+        - `matchesSourceFluids` - A predicate matching whether the fluid has the source property set to true.
+        - `matchesFluids` now has an overload that can taken in a `StatePropertiesPredicate`
+    - `MatchingFluidsPredicate` can now takes in a `StatePropertiesPredicate`
 - `net.minecraft.world.level.levelgen.densityfunction`
     - `DensityBuffer`
         - `slice` - Creates a new buffer of the specified size.
@@ -949,6 +1148,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `TracyProfiledFunction` - A density function that profiled by the tracy client.
 - `net.minecraft.world.level.levelgen.densityfunction.op.SplineFunction$Sampler` now takes in a `CubicSpline$Multipoint` instead of a `CubicSpline`
 - `net.minecraft.world.level.levelgen.feature`
+    - `CrevasseFeature` - A feature that generates a crevasse.
     - `LargeDripstoneFeature` -> `LargeSpeleothemFeature`, now taking in the base `BlockState`
     - `OreFeature#doPlace` no longer takes in the Y start and size `int`s
     - `SpeleothemClusterFeature` now takes in the `$PlacementOptions`
@@ -960,11 +1160,29 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `$BaseBlockTransformer` - How the base block the speleothem is attached to changes.
 - `net.minecraft.world.level.levelgen.feature.trunkplacers.StraightTrunkPlacer` now has an overload that takes in an `IntProvider` for the trunk width
 - `net.minecraft.world.level.levelgen.material`
+    - `FlowingFluid`
+        - `FALLING` replaced by `SOURCE`, not one-to-one
+        - `getFlowing` methods have been combined into a single `getFlowing` method taking in an `int` amount, returning a `FluidState`
+        - `getSource` methods have been combined into a single `getSource` method that returns a `FluidState`
+    - `Fluid`
+        - `makeDefaultState` - The default state of the fluid.
+        - `canBeReplacedWith` now takes in a `FluidState` instead of a `Fluid`
+        - `isFalling` - Whether the fluid is currently falling (i.e., not source with the full fluid amount).
+        - `isSame`, `is` are removed
+    - `FluidIds`, `Fluids#FLOWING_WATER`, `FLOWING_LAVA` are removed
+    - `FluidState`
+        - `isSourceOfType` now has an overload that takes in a `TagKey`
+        - `isFalling` - Whether the fluid is currently falling (i.e., not source with the full fluid amount).
+        - `canBeReplacedWith` now takes in a `FluidState` instead of a `Fluid`
+    - `LavaFluid` is no longer abstract
+        - `$Flowing`, `$Source` are removed
     - `MaterialRuleContext` constructor is now `public` from package-private, taking in the `BiomeResolver` instead of a function for the biome getter
         - `updateXZ`, `updateY` are now `public` from package-private
     - `MaterialSystem` no longer takes in the default `BlockState`
         - `topMaterial` is removed
         - `surfaceExtensions` - The extensions to the surface terrain.
+    - `WaterFluid` is no longer abstract
+        - `$Flowing`, `$Source` are removed
 - `net.minecraft.world.level.levelgen.placement`
     - `PlacementContext` is now a `record`, no longer extending `WorldGenerationContext`
         - The constructor now takes in the `VerticalAnchor$Context`
@@ -1012,4 +1230,14 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `isForState` - Whether the `BlockState` has the associated `PathType`.
 - `net.minecraft.world.level.storage.loot.entries.UniformContainerBase$Builder` no longer implements `FunctionUserBuilder`
     - Its superclass still does, however
+- `net.minecraft.world.level.validation`
+    - `ContentValidationException`
+        - `getMessage` is removed
+        - `getIssues` - Returns the issues that violate the content restrictions.
+    - `DirectoryValidator`
+        - `validateSymlink` replaced with `validateAndResolveLink`, now taking in a `Path` and optionally the `BasicFileAttributes`, and returning the resolved `Path`, able to throw a `ContentValidationException`
+        - `validateDirectory` no longer returns anything, and can throw a `ContentValidationException`
+        - `validateKnownDirectory` no longer takes in the list of `ForbiddenSymlinkInfo`, now able to throw a `ContentValidationException`
+    - `ForbiddenSymlinkInfo` -> `ForbiddenLinkInfo`
+        - The constructor now takes in a `boolean` for whether the link has the windows `FILE_ATTRIBUTE_REPARSE_POINT` set 
 - `net.minecraft.world.phys.AABB#ofRadius` - Constructs a box centered around the given point with the XYZ radii.
