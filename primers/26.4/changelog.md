@@ -1,6 +1,6 @@
 # Changelog
 
-The following is a non-exhaustive changelog of the differences between 26.3 to 26.4
+The following is a non-exhaustive changelog of the differences from 26.3 to 26.4.
 
 ## Environment Attribute Changes
 
@@ -11,7 +11,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
 - `minecraft:biome`
     - `is_cave`
     - `generated_in_below_zero_retrogen`
-    - `spawns_strays_without_powder_snow`
+    - `spawns_cold_variants_underground`
 - `minecraft:block`
     - `ice_cave_ore_replaceables`
     - `large_icicle_replaceable`
@@ -36,6 +36,10 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `no_hurt_sound`
 - `minecraft:entity_type`
     - `does_not_break_brittle_ice`
+    - `freeze_immune_entity_types` -> `immune_to_freezing`
+    - `ignores_poison_and_regen` split into `immune_to_poison`, `immune_to_regeneration`
+    - `immune_to_weakness`
+    - `immune_to_wither`
 - `minecraft:fluid`
     - `water`, `lava` marked as deprecated
 - `minecraft:item`
@@ -60,9 +64,10 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `RenderTarget#blitAndBlendToTexture` no longer takes in the `GpuTextureView` for the output depth
 - `com.mojang.blaze3d.platform`
     - `NativeLibrariesBootstrap#isVulkanLoaderAvailable` -> `VulkanBackend#isVulkanLoaderAvailable`, now `private` from `public`
-    - `Window` constructor now takes in the `GpuDevice` and requires the `int` maximum window size
+    - `Window` constructor now requires the `int` maximum window size
         - `isWayland` - If the display protocol uses Wayland.
         - `show` - Shows and syncs the window associated with the stored handle.
+        - `setNeedsBorderlessFullscreenPadding` - Sets whether the borderless fullscreen view needs padding to render properly.
 - `com.mojang.blaze3d.systems`
     - `RenderSystem`
         - `MINIMUM_ATLAS_TEXTURE_SIZE` -> `GlHeuristics#MINIMUM_SUPPORTED_MAX_TEXTURE_SIZE`
@@ -70,6 +75,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `disableScissorForRenderTypeDraws` -> `ScissorState#disable`
         - `getScissorStateForRenderTypeDraws` is removed
         - `getPipelineBuilder` - Returns the compiler for the `RenderPipeline`s.
+        - `isMultidrawIndirectAvailable` - Whether multidraw indirect calls are available to use for the GPU device.
     - `ScissorState` -> `com.mojang.renderpearl.util.ScissorState`
 - `com.mojang.realmsclient.gui.screens.AbstractRealmsCodeScreen#MENU_LIST_BACKGROUND` -> `Screen#MENU_LIST_BACKGROUND`
 - `com.mojang.renderpearl.api.commands`
@@ -79,12 +85,14 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `copyTextureToBuffer` no longer takes in a `Runnable` callback
     - `RenderPass#MAX_VERTEX_BUFFERS` -> `CompiledRenderPipeline$CreateInfo#MAX_VERTEX_BUFFERS`, now eight from sixteen
 - `com.mojang.renderpearl.api.device`
+    - `DeviceFeatures#dxgiSurface` - Whether the DirectX Graphics Interface (DXGI) is available as an intermediate library.
     - `GpuBackend#createDevice` now takes in the application `String` name and `int` version
     - `GpuDebugOptions` now takes in `boolean`s for whether the shaders are currently being debugged (i.e., if renderdoc is attached), and whether the passed in data heading towards the GPU should be strictly validated (i.e., if the game is running in an IDE)
     - `GpuDevice`
         - `createSpvModule` - Creates the `SpvModule` representing the compiled shader.
         - `compilePipeline` now only takes in a `CompiledRenderPipeline$CreateInfo`, returning the raw `CompiledRenderPipeline$Pending` instead of a `CompletableFuture`
-    - `HintsAndWorkarounds#needsImeFullscreenWorkaround` - A workaround for whether a one pixel padding is required to properly display IME windows in borderless fullscreen. Set for windows platforms that do not support the DXGI swapchain.
+        - `createSurface` now takes in a `boolean` for whether the DXGI surface should be used as the intermediate library.
+    - `GpuSurface#isDXGI` - Whether the surface uses the DirectX Graphics Interface (DXGI).
 - `com.mojang.renderpearl.api.pipeline`
     - `DepthStencilState#OFF` - Disables the depth stencil.
     - `RenderPipeline` -> `com.mojang.blaze3d.pipeline.RenderPipeline`
@@ -109,6 +117,8 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `clearColorAndDepthTextures(GpuTexture, Vector4fc, GpuTexture, double, int, int, int, int, int)` is removed
         - `copyTextureToBuffer(GpuTexture, GpuBuffer, long, Runnable, int)` is removed
         - `copyTextureToBuffer` no longer takes in a `Runnable` callback
+    - `GpuDeviceBackend#createSurface` now takes in a `boolean` for whether the DXGI surface should be used as the intermediate library.
+    - `GpuSurfaceBackend#isDXGI` - Whether the surface uses the DirectX Graphics Interface (DXGI).
     - `SpvModule` -> `.renderpearl.api.pipeline.SpvModule`
         - `name` - The name of the shader.
         - `entryPoint` - The name of the starting method (`PipelineBuilder` hardcodes this to "main").
@@ -227,11 +237,20 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `DXGISampleDesc` - Describes multi-sampling parameters for a resource, analogous to DXGI_SAMPLE_DESC.
     - `DXGISwapchain3` - An object that implements surfaces for storing rendered data before presenting to some output with features up to DXGI 1.4, analogous to IDXGISwapChain3.
     - `DXGISwapchainDesc1` - Describes a swap chain for DXGI 1.2+, analogous to DXGI_SWAP_CHAIN_DESC1.
-- `net.minecraft.SharedConstants`
-    - `DEBUG_ORE_VEINS`, `DEBUG_DISABLE_ORE_VEINS` are removed
-    - `DEBUG_AQUIFERS`
-    - `DEBUG_LARGE_DRIPSTONE` -> `DEBUG_LARGE_SPELEOTHEM`
-    - `DEBUG_SUBTITLES` is removed
+- `net.minecraft`
+    - `CrashReportCategory#formatLocation` -> `CrashReportUtil#formatLocation`
+    - `CrashReportUtil` - A utility for formatting the crash report details.
+    - `SharedConstants`
+        - `DEBUG_ORE_VEINS`, `DEBUG_DISABLE_ORE_VEINS` are removed
+        - `DEBUG_AQUIFERS`
+        - `DEBUG_LARGE_DRIPSTONE` -> `DEBUG_LARGE_SPELEOTHEM`
+        - `DEBUG_SUBTITLES` is removed
+        - `DEBUG_DISABLE_BELOW_ZERO_RETROGENERATION` is removed
+        - `DEBUG_DISABLE_RUNTIME_MONOMORPHIZATION` - When enabled, the debug flag that disables the monomorphization of a polymorphic class.
+        - `DEBUG_DUMP_RUNTIME_MONOMORPHIC_CLASSES` - When enabled, dumps the monomorphized class to a file.
+        - `IS_RUNNING_IN_IDE` -> `DevUtil#IS_RUNNING_IN_IDE`
+        - `ILLEGAL_FILE_CHARACTERS` -> `FileUtil#ILLEGAL_FILE_CHARACTERS`
+    - `SystemReport#setVersionDetails` - Sets the version information of the game.
 - `net.minecraft.advancements.predicate.StatePropertiesPredicate`
     - `EMPTY` - An empty properties predicate that always returns true.
     - `$Builder#build` now returns the raw `StatePropertiesPredicate` instead of an optional-wrapped value.
@@ -251,7 +270,10 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `$SliderableOrCyclableValueSet` is removed
         - `$ValueSet#createButton` replaced by `buttonFactory`, not one-to-one
             - `createButton` moved to `$ButtonFactory#createButton`, now taking in the `OptionInstance`
-    - `Options#keySocialInteractions` -> `keyOtherPlayers`
+    - `Options`
+        - `keySocialInteractions` -> `keyOtherPlayers`
+        - `preferDXGIPresent` - Whether the graphics library used should be the DirectX Graphics Interface (DXGI) when present.
+        - `extractRenderState` - Extracts the render state of the options.
     - `PresenceSharing#getSprites` - Returns the sprites used for each presence setting.
 - `net.minecraft.client.color.ColorLerper#MUSIC_NOTE_COLORS` -> `MUSIC_NOTE_DYES`
 - `net.minecraft.client.core.registries`
@@ -265,18 +287,41 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `createFrostedIce` -> `createCrackingIce`, now taking in the associated `Block`
     - `createBrittleIce` - Creates the model for brittle ice.
 - `net.minecraft.client.data.models.model.ModelTemplates#ICICLE`, `ICICLE_BASE` - Templates for the icicle block.
+- `net.minecraft.client.gui`
+    - `GuiGraphicsExtractor`
+        - `deltaTracker` - The time delta tracker.
+        - `mouseX`, `mouseY` - The mouse coordinates as long as the mouse is not supressed.
+        - `extractWithoutMouse` - Runs some runnable with the mouse surpressed, typically for extraction.
+        - `partialTicks` - The partial tick of the game.
+        - `extractDeferredElements` no longer takes any arguments
+    - `Hud` now implements `Renderable`
+        - `extractRenderState` no longer takes in the `DeltaTracker`
 - `net.minecraft.client.gui.components`
+    - `AbstractButton#extractContents` no longer takes in the `int` mouse XY and `float` partial tick
     - `AbstractCycleButton` - An abstract class for creating a button that can cycle through some values.
-    - `AbstractSelectionList#INWORLD_MENU_LIST_BACKGROUND` -> `Screen#INWORLD_MENU_LIST_BACKGROUND`
+    - `AbstractScrollArea#extractScrollbar` no longer takes in the `int` mouse XY
+    - `AbstractSelectionList`
+        - `INWORLD_MENU_LIST_BACKGROUND` -> `Screen#INWORLD_MENU_LIST_BACKGROUND`
+        - `extractListItems`, `extractItem` no longer take in the `int` mouse XY and `float` partial tick
+        - `$Entry#extractContent` no longer takes in the `int` mouse XY and `float` partial tick
+    - `AbstractTextAreaWidget#extractContents` no longer takes in the `int` mouse XY and `float` partial tick
     - `AbstractWidget`
         - `visible` is now `protected` from `public`
         - `isVisible`, `setVisible` - Handles the visibility of the widget.
+        - `extractTooltipForNextRenderPass` no longer takes in the `int` mouse XY
+        - `extractWidgetRenderState` no longer takes in the `int` mouse XY and `float` partial tick
+    - `BossHealthOverlay` now implements `Renderable`
     - `Button$Builder` now takes in a generic that extends the `Button$Builder`
         - The constructor is now `protected` from `private`
         - All fields are now `protected` from `private`
         - All methods now return the generic instead of the builder instance
         - `tooltip` now has an overload that takes in a `Component`
-    - `CommandSuggestions#mouseClicked` now takes in the `MouseButtonEvent` instead of the `int` XY location
+    - `ChatComponent#extractRenderState` no longer takes in the `int` mouse XY
+    - `CommandSuggestions` now implements `Renderable`
+        - `mouseClicked` now takes in the `MouseButtonEvent` instead of the `int` XY location
+        - `extractRenderState`, `extractSuggestions` no longer take in the `int` mouse XY
+        - `$SuggestionList` now implements `Renderable`
+            - `extractRenderState` no longer takes in the `int` mouse XY
     - `CycleButton` has been split into `CycleButton` and `AbstractCycleButton`
         - `CycleButton` now extends `AbstractCycleButton`
         - The constructor no longer takes in the `Component` message
@@ -285,7 +330,8 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `$Builder` now extends `AbstractCycleButton$Builder`
         - `$OnValueChange` -> `AbstractCycleButton$OnValueChange`
         - `$ValueListSupplier` -> `AbstractCycleButton$ValueListSupplier`
-    - `DebugScreenOverlay#clearColumnCache` - Clears the contents of the debug columns displayed on the sides of the window.
+    - `DebugScreenOverlay` now implements `Renderable`
+        - `clearColumnCache` - Clears the contents of the debug columns displayed on the sides of the window.
     - `EditBox`
         - `isVisible`, `setVisible` -> `AbstractWidget#isVisible`, `setVisible`
         - `setMaxWidth` - Sets the maximum width of the edit box.
@@ -293,6 +339,10 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `LoadingButton` - A button that displays a sprite, displaying a loading icon after press if set.
     - `PlainTextButton` now has an overload that takes in `$CreateNarration`
     - `PlayerFaceWidget` now takes in an `int` border around the widget
+    - `PlayerTabOverlay` now implements `Renderable`
+        - `extractRenderState` -> `extractContents`, now `private` from `public`
+            - `extractRenderState` still exists, only taking in the `GuiGraphicsExtractor`
+    - `Renderable#extractRenderState` no longer takes in the `int` mouse XY and `float` partial tick
     - `ScaledWidgetSprites` - Widget sprites that are scaled to the provided width and height.
     - `ScrollableLayout#alignVertically`, `alignVerticallyTop`, `alignVerticallyMiddle`, `alignVerticallyBottom` - Methods for aligning the layout in the Y direction.
     - `SpriteIconButton` has been split into `SpriteIconButton` and `LoadingButton`
@@ -312,6 +362,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
             - `narration` -> `Button$Builder#createNarration`
         - `$CenteredIcon`, `$TextAndIcon` merged into `SpriteIconButton` with different `$DisplayState`s
     - `SpriteIconCycleButton` - A cycle button that cycles through sprites for the values.
+    - `SubtitleOverlay` now implements `Renderable`
     - `TabButton` now takes in the label `Component`
 - `net.minecraft.client.gui.components.debug`
     - `DebugColumn` - A column containing the debug contents to display.
@@ -341,6 +392,8 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `getEntry` replaced by `Registry#getValue`
         - `bootstrap` - Registers the vanilla debug screen entries.
     - `DebugScreenEntryList#getStatus`, `isCurrentlyEnabled`, `setStatus`, `toggleStatus`, `getCurrentlyEnabled` now deal with `ResourceKey`s instead of `Identifier`s
+- `net.minecraft.client.gui.components.spectator.SpectatorGui` now implements `Renderable`
+    - `extractHotbar`, `extractAction` are now `private` from `public`
 - `net.minecraft.client.gui.components.tabs`
     - `GridLayoutTab` no longer takes in the title `Component`
     - `LoadingTab` no longer takes in the title `Component`
@@ -351,6 +404,9 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `$MenuTabButton` now takes in the label `Component`
             - `renderMenuBackground` -> `extractMenuBackground`
     - `Tab#getTabTitle` is removed
+- `net.minecraft.client.gui.components.toasts.ToastManager` now implements `Renderable`
+- `net.minecraft.client.gui.contextualbar.ContextualBar` now extends `Renderable`
+    - `extractBackground`, `extractRenderState` no longer take in the `DeltaTracker`
 - `net.minecraft.client.gui.font`
     - `FontTexture` no longer extends `AbstractTexture` and implements `Dumpable`, instead implementing `AutoCloseable`
         - The constructor now takes in the `TexutureManager` and texture `Identifier` instead of the supplied `String` label
@@ -370,6 +426,14 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `Screen`
         - `isInitialized` - Whether the screen has been initialized.
         - `extractListSeparators` - Blits the header and footer separators for some layout.
+        - `extractRenderStateWithTooltipAndSubtitles`, `extractBackground` no longer take in the `int` mouse XY and `float` partial tick
+        - `extractPanorama` no longer takes in the `float` partial tick
+- `net.minecraft.client.gui.screens.achievement.StatsScreen$ItemStatisticsList`
+    - `blockColumns` -> `BLOCK_COLUMNS`, now `private` and `static` from `protected`
+    - `itemColumns` -> `ITEM_COLUMNS`, now `private` and `static` from `protected`
+- `net.minecraft.client.gui.screens.advancement`
+    - `AdvancementsScreen#extractWindow` no longer takes in the `int` mouse XY
+    - `AdvancementTab#extractTab` no longer takes in the `int` mouse XY
 - `net.minecraft.client.gui.screens.debug.DebugOptionsScreen$OptionEntry` now takes in a `ResourceKey` instead of an `Identifier`
 - `net.minecraft.client.gui.screens.friends`
     - `AbstractFriendsEntryContainerWidget` class is now `public` from package-private
@@ -442,15 +506,30 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `isQuickCrafting` is now `private` from `protected`
         - `hasClickedOutside` no longer takes in the origin XY `int`s
         - `updateLastQuickMoved` - Sets the last quick moved `ItemStack` using the provided `Slot`.
+        - `extractContents` no longer takes in the `int` mouse XY and `float` partial tick
+        - `extractCarriedItem`, `extractSlots`, `extractTooltip`, `extractLabels`, `extractSlot` no longer take in the `int` mouse XY
+    - `AbstractMountInventoryScreen#xMouse`, `yMouse` are removed
     - `AbstractSignEditScreen`
         - `getSignTextScale` replaced by `getSignTextSpacing`, not one-to-one
         - `getSignYOffset` replaced by `getSignTextYOffset`, now returning an `int` instead of a `float`, not one-to-one
+    - `CreativeModeInventoryScreen` no longer takes in the `int` mouse XY
+    - `CyclingSlotBackground#extractRenderState` no longer takes in the `float` partial tick
+    - `EffectsInInventory` now implements `Renderable`
+        - `extractRenderState` no longer takes in the `int` mouse XY
     - `HangingSignEditScreen#MAGIC_BACKGROUND_SCALE` is now `private` from `public`
-    - `InventoryScreen#extractEntityInInventoryFollowsMouse` -> `EntityPortraitWidget#extractEntityInInventoryFollowsMouse`, the size a `float` instead of an `int`, and an `Entity` instead of a `LivingEntity`
+    - `InventoryScreen#extractEntityInInventoryFollowsMouse` -> `EntityPortraitWidget#extractEntityInInventoryFollowsMouse`, the size a `float` instead of an `int`, and an `Entity` instead of a `LivingEntity`, no longer taking in the `int` mouse XY
     - `JukeboxScreen` - The screen for displaying the jukebox playlist.
+    - `MerchantScreen$TradeOfferButton#extractToolTip` no longer takes in the `int` mouse XY
     - `SignEditScreen#MAGIC_BACKGROUND_SCALE` is now `private` from `public`
+- `net.minecraft.client.gui.screens.recipebook`
+    -  `GhostSlots#extractTooltip` no longer takes in the `int` mouse XY
+    -  `RecipeBookComponent#extractTooltip` no longer takes in the `int` mouse XY
+    -  `RecipeBookPage`
+        - `extractRenderState` no longer takes in the `int` mouse XY and `float` partial tick
+        - `extractTooltip` no longer takes in the `int` mouse XY
 - `net.minecraft.client.gui.screens.reporting`
     - `AbstractReportScreen$DiscardReportWarningScreen` -> `DiscardReportWarningScreen`, not one-to-one
+    - `ChatSelectionScreen$ChatSelectionList#extractItem` no longer takes in the `int` mouse XY and `float` partial tick
     - `DraftIconButton` - Icon button for drafting a report.
     - `ReportPlayerScreen` now takes in the player `UUID`, `String` name, and the supplied `PlayerSkin` instead of the `PlayerEntry`, and `boolean` for whether the skin is reportable, chat message is reportable, and if the player has sent recent messages
 - `net.minecraft.client.gui.screens.social`
@@ -528,6 +607,10 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `registerProviders` replaced with `bootstrap`
         - `getProviders` replaced with `Registry#entrySet`
         - `getProvider` - Gets the provider associated with some `ParticleOptions`.
+    - `SingleQuadParticle`
+        - `uvFlip`, `$UvFlip` - Determines how the UV coordinates map onto the particle texture.
+        - `$Layer` now takes in a function mapping a nullable `OitStage` to the `RenderPipeline` to use instead of the base `RenderPipeline` and a nullable `OitPipelineSet`
+    - `SpriteSet#size` - The number of sprites in the set.
 - `net.minecraft.client.player.LocalPlayer#getRidingSoundId` - An identifier representing the riding sound that should be playing.
 - `net.minecraft.client.renderer`
     - `BindGroupLayouts`
@@ -546,30 +629,181 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `oitCloudDepth` is removed
     - `PlayerSkinRenderCache#createSkinLookup` - Looks up the player skin from the given profile.
     - `PostPass$TextureInput` now takes in a `TextureHandle` instead of an `AbstractTexture`
-    - `RenderPipelines`
+    - `RenderPipelines` -> `.pipeline.RenderPipelines`
+        - `IS_GUI` and `IS_SEE_THROUGH` shader defined replaced by `AFFECTED_BY_FOG_AND_LIGHT`
+            - More specifically, `!IS_GUI && !IS_SEE_THROUGH = AFFECTED_BY_FOG_AND_LIGHT`
+        - `MATRICES_FOG_LIGHT_DIR_SNIPPET` inlined into `entity` when `EntityRenderPipelineVariant#lighting` is not `NONE` and `item`
+        - `GENERIC_BLOCKS_SNIPPET` inlined into `terrain`, `block`, and `crumbling`
         - `LIT_BLOCKS_SNIPPET` is removed
-        - `UNLIT_TERRAIN_SNIPPET` - A snippet for unlit terrain.
         - `IMPROVED_FOG_SNIPPET` - A snippet for improved fog rendering.
-        - `SINGLEDRAW_TERRAIN_SNIPPET` - A snippet for rendering the terrain in single draw calls.
-        - `SOLID_SNIPPET` - Snippet for opaque objects.
-        - `CUTOUT_SNIPPET` - Snippet for objects with a mix of opaque or completely transparent pixels.
-        - `TRANSLUCENT_SNIPPET` - Snippet for objects with translucent pixels.
-        - `WIREFRAME_SNIPPET` - Snippet that uses the wireframe polygon mode.
-        - `OIT_CLOUDS_SNIPPET` replaced by `OIT_BLIT_CLOUDS_SNIPPET`
-        - `SKY_SNIPPET`, `SKY_OCCLUDER_SNIPPET`, `END_SKY_SNIPPET`, `SUNRISE_SUNSET_SNIPPET`, `STARS_SNIPPET`, `CELESTIAL_SNIPPET` - Snippets for sky rendering.
-        - `SOLID_TERRAIN_IMPROVED_FOG`, `SOLID_TERRAIN_IMPROVED_FOG_MULTIDRAW` - Pipelines for rendering solid terrain with improved fog rendering.
-        - `CUTOUT_TERRAIN_IMPROVED_FOG`, `CUTOUT_TERRAIN_IMPROVED_FOG_MULTIDRAW` - Pipelines for rendering cutout terrain with improved fog rendering.
-        - `END_PORTAL_GUI` - Pipeline for `END_PORTAL` in a GUI.
+        - `TERRAIN_SNIPPET` inlined into `terrain`
+        - `MULTIDRAW_TERRAIN_SNIPPET` inlined into `terrain`
+        - `BLOCK_SNIPPET` inlined into `block`
+        - `WATER_MASK_SNIPPET` inlined into `waterMask`
+        - `LIGHTNING_SNIPPET` inlined into `additiveVisualEffect`
+        - `DRAGON_RAYS_SNIPPET` inlined into `additiveVisualEffect`
+        - `ENTITY_NO_LIGHTMAP_SNIPPET` inlined into `entity`
+        - `ENTITY_SNIPPET` inlined into `entity`
+        - `OIT_ENTITY_SNIPPET` inlined into `entity`
+        - `ENTITY_EMISSIVE_SNIPPET` inlined into `entity`
+        - `EYES_SNIPPET` inlined into `entity`
+        - `BEACON_BEAM_SNIPPET` inlined into `beaconBeam`
+        - `ITEM_SNIPPET` inlined into `item`
+        - `OIT_ITEM_SNIPPET` inlined into `item`
+        - `TEXT_SNIPPET` inlined into `text`
+        - `WORLD_TEXT_SNIPPET` inlined into `text`
+        - `END_PORTAL_SNIPPET` inlined into `endPortal`
+        - `CLOUDS_SNIPPET` inlined into `clouds`
+        - `LINES_SNIPPET` inlined into `lines`
+        - `OIT_LINES_SNIPPET` inlined into `lines`
+        - `DEBUG_FILLED_SNIPPET` inlined into `debugPrimitive`
+        - `OIT_DEBUG_FILLED_SNIPPET` inlined into `debugPrimitive`
+        - `DEBUG_POINTS_SNIPPET` inlined into `debugPrimitive`
+        - `PARTICLE_SNIPPET` inlined into `particle`
+        - `OIT_PARTICLE_SNIPPET` inlined into `particle`
+        - `WEATHER_SNIPPET` inlined into `particle`
+        - `CRUMBLING_SNIPPET` inlined into `crumbling`
+        - `GUI_TEXT_SNIPPET` inlined into `text`
+        - `POST_PROCESSING_SNIPPET` inlined within `PostChain#createPass`
+        - `SOLID_BLOCK` replaced by `block` with `BlockRenderPipelineVariant#SOLID`
+        - `SOLID_TERRAIN` replaced by `terrain` with `TerrainRenderPipelineVariant#SOLID`
+        - `SOLID_TERRAIN_MULTIDRAW` replaced by `terrain` with `TerrainRenderPipelineVariant#SOLID` and `$TerrainParameters#multiDraw` set to `true`
+        - `WIREFRAME` replaced by `terrain` with `$TerrainParameters#wireframe` set to `true`
+        - `WIREFRAME_MULTIDRAW` replaced by `terrain` with `$TerrainParameters#multiDraw`, `wireframe` set to `true`
+        - `CUTOUT_BLOCK` replaced by `block` with `BlockRenderPipelineVariant#CUTOUT`
+        - `CUTOUT_TERRAIN` replaced by `terrain` with `TerrainRenderPipelineVariant#CUTOUT`
+        - `CUTOUT_TERRAIN_MULTIDRAW` replaced by `terrain` with `TerrainRenderPipelineVariant#CUTOUT` and `$TerrainParameters#multiDraw` set to `true`
+        - `TRANSLUCENT_TERRAIN` replaced by `terrain` with `TerrainRenderPipelineVariant#TRANSLUCENT`
+        - `TRANSLUCENT_TERRAIN_MULTIDRAW` replaced by `terrain` with `TerrainRenderPipelineVariant#TRANSLUCENT` and `$TerrainParameters#multiDraw` set to `true`
+        - `OIT_TERRAIN` replaced by `terrain` with `$TerrainParameters#oitStage` not `null`
+        - `OIT_TERRAIN_MULTIDRAW` replaced by `terrain` with `$TerrainParameters#multiDraw` set to `true`, `oitStage` not `null`
+        - `TRANSLUCENT_BLOCK` replaced by `block` with `BlockRenderPipelineVariant#TRANSLUCENT`
+        - `OIT_TRANSLUCENT_BLOCK` replaced by `block` with `BlockRenderPipelineVariant#TRANSLUCENT` and `$BlockParameters#oitStage` not `null`
+        - `ARMOR_CUTOUT_NO_CULL` replaced by `entity` with `EntityRenderPipelineVariant#ARMOR_CUTOUT_NO_CULL`
+        - `ARMOR_DECAL_CUTOUT_NO_CULL` replaced by `entity` with `EntityRenderPipelineVariant#ARMOR_DECAL_CUTOUT_NO_CULL`
+        - `WOLF_ARMOR_CRACKS` replaced by `entity` with `EntityRenderPipelineVariant#WOLF_ARMOR_CRACKS`
+        - `ENTITY_SOLID` replaced by `entity` with `EntityRenderPipelineVariant#SOLID`
+        - `ENTITY_SOLID_Z_OFFSET_FORWARD` replaced by `entity` with `EntityRenderPipelineVariant#SOLID`
+        - `ENTITY_CUTOUT_CULL` replaced by `entity` with `EntityRenderPipelineVariant#CUTOUT_CULL`
+        - `ENTITY_CUTOUT` replaced by `entity` with `EntityRenderPipelineVariant#CUTOUT`
+        - `ENTITY_CUTOUT_Z_OFFSET` replaced by `entity` with `EntityRenderPipelineVariant#CUTOUT`
+        - `ENTITY_CUTOUT_DISSOLVE` replaced by `entity` with `EntityRenderPipelineVariant#CUTOUT_DISSOLVE`
+        - `ENTITY_TRANSLUCENT` replaced by `entity` with `EntityRenderPipelineVariant#TRANSLUCENT`
+        - `OIT_ENTITY` replaced by `entity` with `$EntityParameters#oitStage` not `null`
+        - `ENTITY_TRANSLUCENT_EMISSIVE` replaced by `entity` with `EntityRenderPipelineVariant#TRANSLUCENT_EMISSIVE`
+        - `OIT_ENTITY_EMISSIVE` replaced by `entity` with `EntityRenderPipelineVariant#TRANSLUCENT_EMISSIVE` and `$EntityParameters#oitStage` not `null`
+        - `ENTITY_TRANSLUCENT_CULL` replaced by `entity` with `EntityRenderPipelineVariant#TRANSLUCENT_CULL`
+        - `OIT_ENTITY_CULL` replaced by `entity` with `EntityRenderPipelineVariant#TRANSLUCENT_CULL` and `$EntityParameters#oitStage` not `null`
+        - `END_CRYSTAL_BEAM` replaced by `entity` with `EntityRenderPipelineVariant#END_CRYSTAL_BEAM`
+        - `BANNER_PATTERN` replaced by `entity` with `EntityRenderPipelineVariant#BANNER_PATTERN`
+        - `BREEZE_WIND` replaced by `entity` with `EntityRenderPipelineVariant#BREEZE_WIND`
+        - `OIT_BREEZE_WIND` replaced by `entity` with `EntityRenderPipelineVariant#BREEZE_WIND` and `$EntityParameters#oitStage` not `null`
+        - `ENERGY_SWIRL_SNIPPET` inlined into `entity`
+        - `ENERGY_SWIRL` replaced by `entity` with `EntityRenderPipelineVariant#ENERGY_SWIRL`
+        - `OIT_ENERGY_SWIRL` replaced by `entity` with `EntityRenderPipelineVariant#ENERGY_SWIRL` and `$EntityParameters#oitStage` not `null`
+        - `EYES` replaced by `entity` with `EntityRenderPipelineVariant#EYES`
+        - `OIT_EYES` replaced by `entity` with `EntityRenderPipelineVariant#EYES` and `$EntityParameters#oitStage` not `null`
+        - `ENTITY_SHADOW_SNIPPET` inlined into `entityShadow`
+        - `ENTITY_SHADOW` replaced by `entityShadow`
+        - `OIT_ENTITY_SHADOW` replaced by `entityShadow` with `OitStage` parameter not `null`
+        - `GLINT_SPECIAL_SNIPPET` inlined into `item`
+        - `ARMOR_CUTOUT_NO_CULL_GLINT` replaced by `entity` with `EntityRenderPipelineVariant#ARMOR_CUTOUT_NO_CULL_GLINT`
+        - `ENTITY_SOLID_GLINT` replaced by `entity` with `EntityRenderPipelineVariant#SOLID_GLINT`
+        - `ITEM_CUTOUT` replaced by `item` with `ItemRenderPipelineVariant#CUTOUT`
+        - `ITEM_CUTOUT_GLINT` replaced by `item` with `ItemRenderPipelineVariant#CUTOUT_GLINT`
+        - `ITEM_CUTOUT_GLINT_SPECIAL` replaced by `item` with `ItemRenderPipelineVariant#CUTOUT_GLINT_SPECIAL`
+        - `ITEM_TRANSLUCENT` replaced by `item` with `ItemRenderPipelineVariant#TRANSLUCENT`
+        - `OIT_ITEM` replaced by `item` with `ItemRenderPipelineVariant#TRANSLUCENT` and `$ItemParameters#oitStage` not `null`
+        - `ITEM_TRANSLUCENT_GLINT` replaced by `item` with `ItemRenderPipelineVariant#TRANSLUCENT_GLINT`
+        - `ITEM_TRANSLUCENT_GLINT_SPECIAL` replaced by `item` with `ItemRenderPipelineVariant#TRANSLUCENT_GLINT_SPECIAL`
+        - `OIT_ITEM_GLINT` replaced by `item` with `ItemRenderPipelineVariant#TRANSLUCENT_GLINT` and `$ItemParameters#oitStage` not `null`
+        - `OIT_ITEM_GLINT_SPECIAL` replaced by `item` with `ItemRenderPipelineVariant#TRANSLUCENT_GLINT_SPECIAL` and `$ItemParameters#oitStage` not `null`
+        - `BEACON_BEAM_OPAQUE` replaced by `beaconBeam`
+        - `BEACON_BEAM_TRANSLUCENT` replaced by `beaconBeam` with `$BeaconBeamParameters#translucent` set to `true`
+        - `OIT_BEACON_BEAM` replaced by `beaconBeam` with `$BeaconBeamParameters#translucent` set to `true`, `oitStage` not `null`
+        - `WATER_MASK` replaced by `waterMask`
+        - `OIT_WATER_MASK` replaced by `waterMask` with `$WaterMaskParameters#improvedTransparency` set to `true`
+        - `CRUMBLING` replaced by `crumbling`
+        - `OIT_CRUMBLING` replaced by `crumbling` with `OitStage` parameter not `null`
+        - `TEXT` replaced by `text` with `TextRenderPipelineVariant#WORLD`
+        - `OIT_TEXT` replaced by `text` with `TextRenderPipelineVariant#WORLD` and `$TextParameters#oitStage` not `null`
+        - `GUI_TEXT` replaced by `text` with `TextRenderPipelineVariant#GUI`
+        - `TEXT_GRAYSCALE` replaced by `text` with `TextRenderPipelineVariant#WORLD_GRAYSCALE`
+        - `OIT_TEXT_GRAYSCALE` replaced by `text` with `TextRenderPipelineVariant#WORLD_GRAYSCALE` and `$TextParameters#oitStage` not `null`
+        - `GUI_TEXT_GRAYSCALE` replaced by `text` with `TextRenderPipelineVariant#GUI_GRAYSCALE`
+        - `TEXT_POLYGON_OFFSET` replaced by `text` with `TextRenderPipelineVariant#WORLD_POLYGON_OFFSET`
+        - `OIT_TEXT_POLYGON_OFFSET` replaced by `text` with `TextRenderPipelineVariant#WORLD_POLYGON_OFFSET` and `$TextParameters#oitStage` not `null`
+        - `TEXT_GRAYSCALE_POLYGON_OFFSET` replaced by `text` with `TextRenderPipelineVariant#WORLD_GRAYSCALE_POLYGON_OFFSET`
+        - `OIT_TEXT_GRAYSCALE_POLYGON_OFFSET` replaced by `text` with `TextRenderPipelineVariant#WORLD_GRAYSCALE_POLYGON_OFFSET` and `$TextParameters#oitStage` not `null`
+        - `TEXT_SEE_THROUGH` replaced by `text` with `TextRenderPipelineVariant#WORLD_SEE_THROUGH`
+        - `TEXT_GRAYSCALE_SEE_THROUGH` replaced by `text` with `TextRenderPipelineVariant#WORLD_GRAYSCALE_SEE_THROUGH`
+        - `LIGHTNING` replaced by `additiveVisualEffect` with `PrimitiveTopology#QUADS`
+        - `OIT_LIGHTNING` replaced by `additiveVisualEffect` with `PrimitiveTopology#QUADS` and `$AdditiveVisualEffectParameters#oitStage` not `null`
+        - `DRAGON_RAYS` replaced by `additiveVisualEffect` with `PrimitiveTopology#TRIANGLES`
+        - `OIT_DRAGON_RAYS` replaced by `additiveVisualEffect` with `PrimitiveTopology#TRIANGLES` and `$AdditiveVisualEffectParameters#oitStage` not `null`
+        - `END_PORTAL` replaced by `endPortal`
+        - `END_GATEWAY` replaced by `endPortal` with `$EndPortalParameters#isGateway` set to `true`
+        - `FLAT_CLOUDS` replaced by `clouds`
+        - `OIT_CLOUDS_SNIPPET` inlined into `clouds`
+        - `CLOUDS` replaced by `clouds` with `$CloudParameters#hasBackFaceCulling` set to `true`
         - `OIT_CLOUDS`, `OIT_FLAT_CLOUDS` are removed
-        - `SKY_OCCLUDER` - Pipeline for occluding the sky with fog.
-        - `SKY_WITH_DEPTH_ATTACHMENT`, `SKY_OCCLUDER_WITH_DEPTH_ATTACHMENT`, `END_SKY_WITH_DEPTH_ATTACHMENT`, `SUNRISE_SUNSET_WITH_DEPTH_ATTACHMENT`, `STARS_WITH_DEPTH_ATTACHMENT`, `CELESTIAL_WITH_DEPTH_ATTACHMENT` - Pipelines for sky rendering with a depth attachment.
+        - `LINES`, `SECONDARY_BLOCK_OUTLINE` replaced by `lines` with `LineRenderPipelineVariant#SOLID`
+        - `LINES_TRANSLUCENT` replaced by `lines` with `LineRenderPipelineVariant#TRANSLUCENT`
+        - `LINES_TRANSLUCENT_NO_DEPTH_WRITE` replaced by `lines` with `LineRenderPipelineVariant#TRANSLUCENT_NO_DEPTH_WRITE`
+        - `OIT_LINES_TRANSLUCENT` replaced by `lines` with `LineRenderPipelineVariant#TRANSLUCENT_NO_DEPTH_WRITE` and `$LinesParameters#oitStage` not `null`
+        - `LINES_DEPTH_BIAS` replaced by `lines` with `LineRenderPipelineVariant#SOLID_WITH_DEPTH_BIAS`
+        - `DEBUG_POINTS` replaced by `debugPrimitive` with `DebugPrimitiveRenderPipelineVariant#POINTS`
+        - `OIT_DEBUG_POINTS` replaced by `debugPrimitive` with `DebugPrimitiveRenderPipelineVariant#POINTS` and `$DebugPrimitiveParameters#oitStage` not `null`
+        - `DEBUG_FILLED_BOX`, `DEBUG_QUADS` replaced by `debugPrimitive` with `DebugPrimitiveRenderPipelineVariant#QUADS`
+        - `OIT_DEBUG_FILLED_BOX`, `OIT_DEBUG_QUADS` replaced by `debugPrimitive` with `DebugPrimitiveRenderPipelineVariant#QUADS` and `$DebugPrimitiveParameters#oitStage` not `null`
+        - `DEBUG_TRIANGLE_FAN` replaced by `debugPrimitive` with `DebugPrimitiveRenderPipelineVariant#TRIANGLE_FAN`
+        - `OIT_DEBUG_TRIANGLE_FAN` replaced by `debugPrimitive` with `DebugPrimitiveRenderPipelineVariant#TRIANGLE_FAN` and `$DebugPrimitiveParameters#oitStage` not `null`
+        - `WORLD_BORDER` replaced by `worldBorder`
+        - `OIT_WORLD_BORDER` replaced by `worldBorder` with `OitStage` parameter not `null`
+        - `OPAQUE_PARTICLE` replaced by `particle` with `ParticleRenderPipelineVariant#OPAQUE`
+        - `TRANSLUCENT_PARTICLE` replaced by `particle` with `ParticleRenderPipelineVariant#TRANSLUCENT`
+        - `OIT_PARTICLE` replaced by `particle` with `ParticleRenderPipelineVariant#TRANSLUCENT` and `$ParticleParameters#oitStage` not `null`
+        - `WEATHER` replaced by `particle` with `ParticleRenderPipelineVariant#WEATHER`
+        - `OIT_WEATHER` replaced by `particle` with `ParticleRenderPipelineVariant#WEATHER` and `$ParticleParameters#oitStage` not `null`
+        - `SKY` replaced by `sky` with `SkyRenderer$SkyElement#SKY_DISC`
+        - `END_SKY` replaced by `sky` with `SkyRenderer$SkyElement#END_SKY`
+        - `SUNRISE_SUNSET` replaced by `sky` with `SkyRenderer$SkyElement#SUNRISE_SUNSET`
+        - `STARS` replaced by `sky` with `SkyRenderer$SkyElement#STARS`
+        - `CELESTIAL` replaced by `sky` with `SkyRenderer$SkyElement#CELESTIAL`
         - `BLIT_DEPTH_DURING_DEPTH_BOUNDS` is removed
         - `BLIT_SKY` - Pipeline for drawing the sky to the screen.
-        - `OIT_BLIT_CLOUDS` - An OIT pipeline for drawing the clouds to the screen.
-    - `ShaderManager#MAX_LOG_LENGTH` is removed
+        - `requiredPipelines`, `optionalPipelines` are removed
+        - `dynamicPipelinesToPrecompile` - Returns the precompiled list of pipelines dynamically constructed based on the variant values.
+        - `staticPipelinesToPrecompile` - Returns the precompiled list of pipelines with associated static constants.
+        - `dynamicPipeline` - Compiles the pipeline using a suppplier and caches the result based on its given parameters.
+        - `terrain`, `$TerrainParameters` - Creates a `RenderPipeline` for the terrain with the given parameters.
+        - `block`, `$BlockParameters` - Creates a `RenderPipeline` for a block with the given parameters.
+        - `entity`, `$EntityParameters` - Creates a `RenderPipeline` for an entity with the given parameters.
+        - `entityShadow` - Creates a `RenderPipeline` for an entity's shadow with the given parameters.
+        - `item`, `$ItemParameters` - Creates a `RenderPipeline` for an item with the given parameters.
+        - `beaconBeam`, `$BeaconBeamParameters` - Creates a `RenderPipeline` for the beacon's beam with the given parameters.
+        - `waterMask`, `$WaterMaskParameters` - Creates a `RenderPipeline` for the water mask used by boats with the given parameters.
+        - `crumbling` - Creates a `RenderPipeline` for the crumbling overlay with the given parameters.
+        - `text`, `$TextParameters` - Creates a `RenderPipeline` for text with the given parameters.
+        - `additiveVisualEffect`, `$AdditiveVisualEffectParameters` - Creates a `RenderPipeline` for a visual effect (e.g., lightning) with the given parameters.
+        - `endPortal`, `$EndPortalParameters` - Creates a `RenderPipeline` for the end portal-like view with the given parameters.
+        - `clouds`, `$CloudParameters` - Creates a `RenderPipeline` for the clouds with the given parameters.
+        - `lines`, `$LinesParameters` - Creates a `RenderPipeline` for a line with the given parameters.
+        - `debugPrimitive`, `$DebugPrimitiveParameters` - Creates a `RenderPipeline` for primitive topology used during debugging with the given parameters.
+        - `worldBorder` - Creates a `RenderPipeline` for the world border with the given parameters.
+        - `particle`, `$ParticleParameters` - Creates a `RenderPipeline` for particles with the given parameters.
+        - `sky`, `$SkyParameters` - Creates a `RenderPipeline` for the sky elements with the given parameters.
+        - `blitClouds` - Creates a `RenderPipeline` for drawing the clouds to the mains screen with the given parameters.
+        - `$DynamicPipelineKey` - A key used to represent a cached, constructed `RenderPipeline`.
+    - `ShaderManager`
+        - `MAX_LOG_LENGTH` is removed
+        - `$PipelineCompilationContext` - The context for how pipelines should be compiled.
     - `SkyRenderer` no longer takes in the `RenderTarget`
         - `prepare` - Sets up the buffer for rendering the sky state.
         - `render` no longer takes in the `GpuBufferSlice` for the fog, instead taking in the `RenderPass`, fog color `Vector4f`, and a `boolean` for whether the it should render with a depth attachment
+        - `$SkyElement` - The element being rendered in the sky.
+    - `WeatherEffectRenderer#render`, `renderOit` combined into `render`, now taking a nullable `OitStage`
+    - `WorldBorderRenderer#render`, `renderOit` combined into `render`, now taking a nullable `OitStage`
     - `ViewArea#getSections` - Returns the render section storage.
 - `net.minecraft.client.renderer.blockentity`
     - `AbstractSignRenderer`
@@ -579,11 +813,13 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `BannerRenderer#DYED_PATTERN_COLOR` - The diffuse color to apply for the pattern layer.
     - `BlockEntityRenderers#bootstrap` - Registries the vanilla block entity renderers.
 - `net.minecraft.client.renderer.chunk`
-    - `ChunkSectionLayer#pipeline` now takes in a `boolean` for whether to use the improved fog pipelines
+    - `ChunkSectionLayer`
+        - `pipeline` now takes in a `boolean` for whether to use the improved fog pipelines, a `boolean` for whether to render in wireframe, and the nullable `OitStage`
+        - `vertexFormat` is no longer nullable
     - `ChunkSectionsToRender`
-        - `render` now takes in a `boolean` for whether to use the improved fog pipelines
+        - `render` now takes in a `boolean` for whether to use the improved fog pipelines, a `boolean` for whether to render in wireframe, and the nullable `OitStage` instead of the nullable `RenderPipeline`s
         - `renderGroup` now takes in the `$ImprovedFogTextures`
-        - `renderLayers` is now `public` from `private`, taking in the `$ImprovedFogTextures`
+        - `renderLayers` is now `public` from `private`, taking in the `$ImprovedFogTextures`, a `boolean` for whether to render in wireframe, and the nullable `OitStage` instead of the nullable `RenderPipeline`s
         - `$ImprovedFogTextures` - A record containing textures for the sky, clouds, and the depth of the clouds.
     - `SectionRenderDispatcher`
         - `getStats` is removed
@@ -612,8 +848,29 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
 - `net.minecraft.client.renderer.fog`
     - `FogData#shouldCreateBossFog` - Whether boss fog should be created.
     - `FogRenderer#setupFog` now takes in a `boolean` for whether boss fog should be created
-- `net.minecraft.client.renderer.oit.OitRenderPassProvider#createRenderPass` now takes in a `boolean` for whether the targets should be cleared after each render call
-- `net.minecraft.client.renderer.rendertype.PreparedRenderType` no longer takes in the `ScissorState`
+- `net.minecraft.client.renderer.oit`
+    - `OitPipelineSet` is removed
+        - This is replaced by `RenderPipelines#dynamicPipeline`, which caches the pipelines lazily
+    - `OitRenderPassProvider#createRenderPass` now takes in a `boolean` for whether the targets should be cleared after each render call
+- `net.minecraft.client.renderer.pipeline.variant`
+    - `BlockRenderPipelineVariant` - A pipeline variant containing information to construct a pipeline for rendering blocks.
+    - `DebugPrimitiveRenderPipelineVariant` - A pipeline variant containing information to construct a pipeline for rendering debug primitive topology.
+    - `EntityRenderPipelineVariant` - A pipeline variant containing information to construct a pipeline for rendering entities.
+    - `ItemRenderPipelineVariant` - A pipeline variant containing information to construct a pipeline for rendering items.
+    - `LineRenderPipelineVariant` - A pipeline variant containing information to construct a pipeline for rendering lines.
+    - `ParticleRenderPipelineVariant` - A pipeline variant containing information to construct a pipeline for rendering particles.
+    - `RenderPipelineVariant` - A data holder of the information needed to construct a pipeline.
+    - `TerrainRenderPipelineVariant` - A pipeline variant containing information to construct a pipeline for rendering terrain.
+    - `TextRenderPipelineVariant` - A pipeline variant containing information to construct a pipeline for rendering text.
+    - `VariantValuesList` - A list wrapper that only makes adding elements publicly accessible.
+- `net.minecraft.client.renderer.rendertype`
+    - `PreparedRenderType` no longer takes in the `ScissorState`, and now takes in a function mapping a nullable `OitStage` to the `RenderPipeline` to use instead of the base `RenderPipeline` and a nullable `OitPipelineSet`
+    - `RenderSetup`
+        - `builder` now takes in a function mapping a nullable `OitStage` to the `RenderPipeline` to use instead of the base `RenderPipeline`
+        - `nonOitBuilder` - A builder that provides a static `RenderPipeline` as long as the `OitStage` is null.
+        - `$Builder#setOitPipelines` is removed, replaced by the function provided in `RenderSetup#builder`
+    - `RenderType#pipeline` is removed
+    - `RenderTypes#SECONDARY_BLOCK_OUTLINE`, `secondaryBlockOutline` replaced by `LINES`, `lines`
 - `net.minecraft.client.renderer.state.level.SkyRenderState#shouldRenderDarkDisc` split into `hasSkyOccluder`
     - `occluderStartAngle`, `occluderEndAngle` represent the specific fog angles that were originally hardcoded by the dark disc
 - `net.minecraft.client.renderer.texture`
@@ -665,6 +922,8 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `Weighted#getSound` is now nullable
 - `net.minecraft.core`
     - `BlockPos` is no longer annotated with `@Immutable`
+        - `horizontalRays` - An iterable returning the `BlockPos`es from the origin stretching along the horizontal plane to the given distance.
+        - `horizontalAtDistance` - An iterable returning the `BlockPos`es at the given distance along the horizontal plane.
     - `Direction#BY_ID` is removed, replaced by `EnumStreamCodec#byId`
     - `Registry#holders` - An iterable of the registered holder references.
     - `Vec3i` is no longer annotated with `@Immutable`
@@ -686,6 +945,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `BuiltinRegistryBuilder` - A builder for creating a registry set.
     - `BuiltInRegistries`, `Registries#RULE_TEST_TYPE` is now a registry of `MapCodec`s instead of `RuleTestType`s
     - `Registries#BLOCK_SOUND_SET` - Registry key for the `BlockSoundSet` world datapack registry.
+- `net.minecraft.data.BlockFamilies#PACKED_ICE`, `PACKED_ICE_BRICKS` - Families for the packed ice variants.
 - `net.minecraft.data.tags.BlockSoundSetTagsProvider` - Tag provider for block sound sets.
 - `net.minecraft.data.worldgen.BiomeDefaultFeatures`
     - `addDefaultUndergroundVariety` now takes in `boolean`s for if it has glow lichen or dirt and granite
@@ -694,11 +954,19 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
 - `net.minecraft.gizmos`
     - `GizmoProperties#withEntityHitboxes` - Whether the gizmo should be rendered when the debug entity hitboxes are on.
     - `SimpleGizmoCollector$GizmoInstance#isWithEntityHitboxes` - If the gizmo should be rendered when the debug entity hitboxes are on.
+- `net.minecraft.nbt`
+    - `SnbtGrammar#escapeControlCharacters` -> `StringTag#escapeControlCharacters`
+    - `TagParser`
+        - `ELEMENT_SEPARATOR` -> `TagUtil#ELEMENT_SEPARATOR`
+        - `NAME_VALUE_SEPARATOR` -> `TagUtil#NAME_VALUE_SEPARATOR`
+    - `TagUtil` - A utility for constants used by tags.
 - `net.minecraft.network`
     - `Connection`
         - `PACKET_HANDLER_ERROR_DISCONNECT_REASON` - The display message for disconnect due to a packet handler error.
         - `initiateServerboundStatusConnection` now takes in the `ServerConnectionDetails` instead of the hostname `String` and `int` port
         - `initiateServerboundPlayConnection` now takes in the `ServerConnectionDetails` instead of the hostname `String` and `int` port
+        - `setInboundEncryptionKey`, `setOutboundEncryptionKey` - Sets the cipher used for the passed key for the pipelines.
+        - `setupInboundCompression`, `setupOutboundCompression` - Sets the compression threshold used for the pipelines.
         - `$ClientboundDisconnectPacketType` - The type of disconnect packet to send.
     - `PacketListener#onPacketError` -> `PacketProcessor$Handler#onPacketError`
     - `PacketProcessor`
@@ -731,6 +999,21 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `STREAM_CODEC` - The network codec.
         - `byId`, `id` are now `private` from `public`
     - `ServerHandshakePacketListener` now extends `ServerboundPacketListener`
+- `net.minecraft.network.protocol.login`
+    - `ClientboundApplyOptionsPacket` - A clientbound packet that sends the connection option flags.
+    - `ClientboundHelloPacket` -> `ClientboundKeyPacket`, now a record
+    - `ClientboundLoginCompressionPacket` -> `ClientboundSetupCompressionPacket`, now a record
+    - `ClientboundLoginFinishedPacket` now implements `ConnectionOptionsPacket`
+        - The constructor now takes in the connection option `byte` flags
+    - `ClientLoginPacketListener`
+        - `handleHello` -> `handleKey`
+        - `handleEnableOptions` - Handles the `ClientboundApplyOptionsPacket`.
+    - `ConnectionOptionsPacket` - A packet that sends and handles the connection option flags.
+    - `ServerboundKeyPacket` is now a record, taking in the `byte` array of the encrypted secret key and challenge
+        - `getSecretKey` is removed
+        - `isChallengeValid` is removed
+    - `ServerboundOptionsAppliedPacket` - A serverbound packet that notifies the server that the client applied the connection options.
+    - `ServerLoginPacketListener#handleOptionsEnabled` - Handles the `ServerboundOptionsAppliedPacket`.
 - `net.minecraft.network.protocol.status`
     - `ServerStatus` now takes in an optional `String` for the contact details of the server
     - `ServerStatusPacketListener` now extends `ServerboundPacketListener`
@@ -764,6 +1047,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
 - `net.minecraft.server.packs.repository.PackDetector#detectPackResources` no longer takes in a list of `ForbiddenSymlinkInfo`, instead potentially throwing a `ContentValidationException`
 - `net.minecraft.sounds.SoundEvents`
     - Fields used for common block sounds are now `BlockSoundCollection`s
+    - `Holder$Reference` constants are now `Holder`s
     - `CAT_*_BABY` merged into `BABY_CAT_SOUND_SET`
     - `CHICKEN_*_BABY` merged into `BABY_CHICKEN_SOUND_SET`
     - `PIG_*_BABY` merged into `BABY_PIG_SOUND_SET`
@@ -771,14 +1055,23 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
 - `net.minecraft.util`
     - `CommonColors#TEXTURE_TINT_COLORS` - The texture tint colors.
     - `CubicSpline$Multipoint#mapCoordinates` now returns a `$Multipoint`
+    - `DevUtil` - A utility for developing the game in a non-production environment.
     - `ExtraCodecs#singleKeyDispatch` - A dispatch codec that uses the key codec as the key to the value codec.
+    - `GsonHelper#convertToItem`, `getAsItem` are removed
     - `Mth#clamp` are removed, use `Math#clamp` instead
     - `StaticCache2d#get` now has an overload that takes in the `ChunkPos`
     - `Util`
         - `writeAndReadTypedOrThrow`, `readTypedOrThrow` are removed
         - `isAarch64` -> `PlatformUtil#IS_AARCH64`
         - `isAppleSiliconMac` -> `PlatformUtil#isAppleSiliconMac`
+        - `logAndPauseIfInIde` -> `DevUtil#logAndPauseIfInIde`
+        - `pauseInIde` -> `DevUtil#pauseInIde`
+        - `setPause` -> `DevUtil#setPause`
 - `net.minecraft.util.debug.DebugPathInfo` now takes in an `int` for how many ticks remain until the next stuck detection check
+- `net.minecraft.util.monomorphizer`
+    - `GeneratedDelegate` - An abstract class the monomorphized, generated class extends.
+    - `MonomorphicDelegateTemplate` - A representation of the transformed, monomorphized class bytes.
+    - `MonomorphizableDelegate` - An abstract class that marks the implementation as able to be monomorphized.
 - `net.minecraft.world.DifficultyInstance` is no longer annotated with `@Immutable`
 - `net.minecraft.world.attribute`
     - `EnvironmentAttribute#isFullResolutionBiomes`, `$Builder#fullResolutionBiomes` are removed
@@ -787,19 +1080,42 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `$Accumulator` no longer uses a generic
             - `accumulate` now takes in `int`s for the sample XYZ instead of a generic value
         - `$Sampler` is removed
-- `net.minecraft.world.effect.FreezingMobEffect` - A mob effect that freezes an entity for one tick.
+- `net.minecraft.world.effect`
+    - `FreezingMobEffect` - A mob effect that freezes an entity for one tick.
+    - `MobEffectIds` - The identifiers of the vanilla mob effects.
 - `net.minecraft.world.entity`
     - `Entity`
+        - `WATER_FLOW_SCALE` -> `WaterFluid#FLOW_SCALE`, now `public` from `private`
+        - `fluidInteraction` is now `protected` from `private`
+        - `wasTouchingWater` replaced by `EntityFluidInteraction$Tracker#wasInFluid`, now `private` from `public`
         - `addDeltaMovement` now has an overload that takes in `double`s for the XYZ velocities
         - `freezeForTicks` - Freezes an entity for the provided number of ticks.
+        - `playSound` now has an overload that takes in a `Holder`-wrapped sound
+        - `onEnterFluid` - What to do when the entity first enters the fluid.
+        - `lerpPositionAndRotationStep` is removed
+    - `EntityFluidInteraction` no longer takes in any arguments
+        - `applyCurrentTo` now only takes in the `Entity` to apply to
+        - `forEnteredFluids` - Applies the consumer to all fluids the entity has entered.
+        - `getFluidsToJumpIn` - Returns the fluids that can be jumped in given the provided threshold.
+        - `getDrag` - Computes the fluid drag on the entity.
+        - `$CurrentAccumulator#applyTo` replaced by `getImpulse`, returning the `Vec3` to apply to the entity's velocity
+        - `$Tracker#getOrCreateCurrentAccumulator`, `getCurrentAccumulator` - Handles getting the current accumulator for the fluid.
     - `EquipmentSlot#BY_ID` is removed, replaced by `EnumStreamCodec#byId`
     - `EquipmentSlotGroup#BY_ID` is removed, replaced by `EnumStreamCodec#byId`
     - `ItemSteerable` now extends `Saddleable`
     - `LivingEntity`
+        - `WATER_DRAG`, `LAVA_DRAG`, `FLYING_LAVA_DRAG`, `FLYING_WATER_DRAG` are removed
+            - Can be obtained via `Fluid#getDrag`
         - `jumpOutOfFluid` is now `protected` from `private`
         - `removeFrost`, `tryAddFrost` are removed
-        - `getEquipSound` is now `final`, no longer taking in the `ItemStack`
+        - `getEquipSound` is now `final`, no longer taking in the `ItemStack`, returning an `Optional`-wrapped sound event holder
         - `setLastDamageSource` - Sets the last damage source taken.
+        - `canBeAffected` is now `final`
+        - `getConsumeSoundOverride` - Returns the consume sound to play, or an empty `Optional` to default to the stack consume sound.
+        - `jumpInLiquid` now takes in a list of `Holder<Fluid>` instead of a `TagKey`
+        - `travelFlying` now takes in a `float` for the fluid speed instead of separate `float`s for the water and lava speed
+        - `isInShallowFluid` is removed
+        - `isInFluidDeeperThan` -> `isFluidDeepEnoughToSwim`, no longer taking in the `double` depth
     - `MobCategory#getDebugAbbreviation` replaced by `getDebugName`
     - `Pose#BY_ID` is removed, replaced by `EnumStreamCodec#byId`
     - `PositionPath$Type`
@@ -838,6 +1154,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
 - `net.minecraft.world.entity.animal.equine`
     - `AbstractHorse` now implements `Saddleable`
         - `playGallopSound` now takes in a `BloudSoundSet` instead of a `SoundType`
+    - `AbstractChestedHorse#playChestEquipsSound` is now `public` from `protected`
     - `Llama$Variant#STREAM_CODEC` is now an `EnumStreamCodec`
     - `Variant#STREAM_CODEC` is now an `EnumStreamCodec`
 - `net.minecraft.world.entity.animal.feline.CatSoundVariant` now implements `AgeableSoundVariant`
@@ -865,6 +1182,10 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `lastDamageSource`, `getLastDamageSource` - The last source to damage this entity.
         - `kill(ServerLevel, Entity)` -> `kill(ServerLevel, DamageSource)`
         - `onKilled` is removed
+    - `HangingEntity`
+        - `canBePlaced` - Whether the entity can be placed at the given location.
+        - `hasLevelCollision` replaced by `collidesWithBlocks`, not one-to-one
+- `net.minecraft.world.entity.monster.skeleton.Stray#checkStraySpawnRules` replaced by `Monster#checkColdVariantSpawnRules`
 - `net.minecraft.world.entity.monster.zombie`
     - `Frostbite` - The frostbite entity.
     - `RangedZombie` - A zombie that can perform a ranged attack.
@@ -876,12 +1197,15 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `convertsToWhenFreezing` - The entity the zombie converts to after freezing (i.e., frostbite).
         - `getFreezingConversionSound` - The level event to run on freeze conversion.
         - `isFreezingConverting` - If the zombie is currently converting to another entity due to freezing.
+- `net.minecraft.world.entity.npc.wanderingtrader.WanderingTrader` no longer implements `Consumable$OverrideConsumeSound`
 - `net.minecraft.world.entity.player`
     - `ChatVisibility#STREAM_CODEC` is now an `EnumStreamCodec`
     - `Plater`
         - `debugInfo` now takes in a `boolean` for whether to include the level name
         - `debugInfoBuilder` - Creates a string helper containing the debug information.
-- `net.minecraft.world.entity.projectile.Projectile#getTrajectoryCorrectionFactor` - How much to offset the target Y of the shot projectile to correct the trajectory for a distant target.
+- `net.minecraft.world.entity.projectile.Projectile`
+    - `getTrajectoryCorrectionFactor` - How much to offset the target Y of the shot projectile to correct the trajectory for a distant target.
+    - `canBreakBlockInAdventureMode` replaced by `ownerCanBreakBlock`, not one-to-one
 - `net.minecraft.world.entity.projectile.throwableitemprojectile`
     - `IceBall` - The ice ball entity.
     - `Snowball` now extends `ThrowableBallProjectile`
@@ -889,6 +1213,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
 - `net.minecraft.world.inventory.JukeboxMenu` - A chest menu for showing the music discs being played.
 - `net.minecraft.world.item`
     - `ArmorStandItem#playSound` - Plays the armor stand placement sound.
+    - `BottleItem#playGlassBottleFillSound` - Plays the bottle fill sound.
     - `BlockItem#getPlaceSound` now takes in a `BlockSoundSet` instead of a `BlockState`, returning a `Holder`-wrapped `SoundEvent`
     - `DyeColor`
         - `getTextureDiffuseColor` replaced by `CommonColors#TEXTURE_TINT_COLORS` and other references depending on the object
@@ -903,6 +1228,16 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `PlaceOnWaterBlockItem` -> `PlaceOnFluidBlockItem`
     - `SolidBucketItem` now takes in a `Holder`-wrapped `SoundEvent` instead of the raw value
 - `net.minecraft.world.item.component`
+    - `Consumable`
+        - `sound` is now `Optional`-wrapped
+        - `$Builder#noSound` - No sound should be played when consumed.
+        - `$OverrideConsumeSound` is removed
+            - `getConsumeSound` replaced by `LivingEntity#getConsumeSoundOverride`
+    - `Equippable`
+        - `equipSound`, `shearingSound` are now `Optional`-wrapped
+        - `$Builder`
+            - `noEquidSound` - No sound should be played on equip.            
+            - `noShearingSound` - No sound should be played on shearing.            
     - `FireworkExplosion`
         - `DEFAULT_COLOR_TINTS`, `defaultFireworkTint` - Handles the firework color collection for a dye.
         - `$Shape#byId` is removed
@@ -984,7 +1319,10 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `ambientLeavesBlockSoundPlayer` is now `Optional`-wrapped
     - `LiquidBlock#shouldBubbleColumnOccupy` is now `public` from `private`
     - `LiquidBlockContainer#canPlaceLiquid` now takes in a `FluidState` instead of a `Fluid`
-    - `MushroomBlock#canSpreadTo` - Whether the mushroom can spread to the given position.
+    - `MushroomBlock`
+        - `canSpreadTo` - Whether the mushroom can spread to the given position.
+        - `canSpread` is now `public` and `static` from `private`
+        - `canSupportCenter` - Whether the block position can support the center of the mushroom.
     - `RedStoneOreBlock` now extends `DropExperienceBlock`
         - The constructor now takes in an `IntProvider` for the XP range
     - `Rotation#BY_ID` is removed, replaced by `EnumStreamCodec#byId`
@@ -1017,25 +1355,28 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
             - Original is `tickWithRecord`
         - `tickWithoutRecord` - Ticks the jukebox under the assumption that it is running a playlist from a different block.
         - `isInPlaylistMode` - If the jukebox is playing from a playlist.
-        - `findNextPlayListPosition` - Finds the next inventory position to play the music disc of.
+        - `findNextPlaylistPosition` - Finds the next inventory position to play the music disc of.
         - `createMenu` - Creates the menu showing the jukebox playlist.
     - `TestInstanceBlockEntity$Status#byIndex` is removed
 - `net.minecraft.world.level.block.sounds`
+    - `AmbientIceBlockSoundsPlayer` - The ambient sounds to play around ice blocks.
     - `AmbientLeavesBlockSoundPlayer`
         - `ambientSound` is now `Optional`-wrapped
         - `noAmbientSound` is removed
     - `BlockSoundCollection` - A collection of sounds to play when commonly interacting with a block.
     - `BlockSoundSet` - The sounds to play when commonly interacting with a block.
     - `BlockSoundSets` - All vanilla block sounds.
-- `net.minecraft.world.level.block.state.BlockBehaviour`
-    - `soundType` replaced by `blockSoundSet`, now an optional `ResourceKey`
-    - `spawnAfterBreak`, `$BlockStateBase#spawnAfterBreak` now takes in a nullable `Entity` for the breaker
-    - `getSoundType`, `$BlockStateBase#getSoundType` replaced by `getSounds`, now returning an optional `ResourceKey`
-    - `$BlockStateBase#getSoundsAsHolder`, `getSounds` - Handles getting the actual `BlockSoundSet` value.
-    - `$Properties`
-        - `mapColor(DyeColor)` is removed
-        - `sound` now takes in a `ResourceKey` instead of a `SoundType`
-        - `noSound` - No sound should be played by this block.
+- `net.minecraft.world.level.block.state`
+    - `BlockBehaviour`
+        - `soundType` replaced by `blockSoundSet`, now an optional `ResourceKey`
+        - `spawnAfterBreak`, `$BlockStateBase#spawnAfterBreak` now takes in a nullable `Entity` for the breaker
+        - `getSoundType`, `$BlockStateBase#getSoundType` replaced by `getSounds`, now returning an optional `ResourceKey`
+        - `$BlockStateBase#getSoundsAsHolder`, `getSounds` - Handles getting the actual `BlockSoundSet` value.
+        - `$Properties`
+            - `mapColor(DyeColor)` is removed
+            - `sound` now takes in a `ResourceKey` instead of a `SoundType`
+            - `noSound` - No sound should be played by this block.
+    - `StateHolder#getValueOrElse` can now return a `null` value
 - `net.minecraft.world.level.block.state.properties`
     - `BlockSetType#soundType` replaced by `blockSoundSet`, now a `ResourceKey`
     - `BlockStateProperties`
@@ -1045,7 +1386,9 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `WoodType`
         - `soundType` replaced by `blockSoundSet`, now a `ResourceKey`
         - `hangingSignSoundType` replaced by `hangingSignSoundSet`, now a `ResourceKey`
-- `net.minecraft.world.level.border.WorldBorder#isInsideCloseToBorder` now has an overload that takes in the `double` XZ position instead of the `Entity`
+- `net.minecraft.world.level.border.WorldBorder`
+    - `isInsideCloseToBorder` now has an overload that takes in the `double` XZ position instead of the `Entity`
+    - `getListeners` is now `private` from `protected`
 - `net.minecraft.world.level.chunk`
     - `CarvingMask`
         - `visit`, `$Visitor` are removed
@@ -1141,13 +1484,34 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - `DensityBuffer`
         - `slice` - Creates a new buffer of the specified size.
         - `copyFrom` now has an overload that takes in the `int` index bounds and the `int` length
+        - `asArrayUnsafe` - Returns the stored `float` array representing the buffer data.
     - `DensityFunction`
         - `idShortString` - Returns the the short string identifier for the provided holder.
         - `getDebugName` - Returns the identifier of the density function type.
+        - `$CompileContext#upscalerCache` - The cache containing the upscaler for the associated parameters.
+    - `DensityFunctions`
+        - `interpolated` replaced with `linearUpscale`
+        - `nearestNeighborUpscale` - Samples the input function and then upscales using the nearest neighbor algorithm.
+        - `linearUpscale` - Samples the input function and then upscales using linear interpolation.
+        - `cubicUpscale` - Samples the input function and then upscales using cubic interpolation.
+        - `cubicBSplineUpscale` - Samples the input function and then upscales using a basis spline with third-order polynomials.
+        - `upscale` - Samples the input function and then upscales along the axes using the given mode algorithm(s).
+    - `DensityVolume`
+        - `fitsOnGrid` - Whether the given XYZ steps are an integer point on the grid.
+        - `strideX`, `strideY`, `strideZ` - How far each step in the given direction goes.
     - `SamplerContext#clearCaches`, `$CacheCell#clear` - Clears the cache cells by closing the buffer.
     - `TracyProfiledFunction` - A density function that profiled by the tracy client.
-- `net.minecraft.world.level.levelgen.densityfunction.op.SplineFunction$Sampler` now takes in a `CubicSpline$Multipoint` instead of a `CubicSpline`
+- `net.minecraft.world.level.levelgen.densityfunction.op`
+    - `InterpolatedFunction` replaced by `UpscaleFunction`, not one-to-one
+    - `SplineFunction$Sampler` now takes in a `CubicSpline$Multipoint` instead of a `CubicSpline`
+- `net.minecraft.world.level.levelgen.densityfunction.op.upscale`
+    - `PolymorphicUpscaler` - An implementation of the `Upscaler` to be monomorphized.
+    - `UpscaleFunction` - A function that samples some input at a reduce resolution, then upscales along each axis using the specified mode algorithms.
+    - `Upscaler` - An interface that upscales the sampled values in the density buffer.
 - `net.minecraft.world.level.levelgen.feature`
+    - `AbstractOreFeature`
+        - `canReplaceOre` -> `checkAirExposure`, no longer taking in the `BlockState` and `BlockReplacement`
+        - `isAdjacentToAir` is now `private` from `public`
     - `CrevasseFeature` - A feature that generates a crevasse.
     - `LargeDripstoneFeature` -> `LargeSpeleothemFeature`, now taking in the base `BlockState`
     - `OreFeature#doPlace` no longer takes in the Y start and size `int`s
@@ -1160,28 +1524,34 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
         - `$BaseBlockTransformer` - How the base block the speleothem is attached to changes.
 - `net.minecraft.world.level.levelgen.feature.trunkplacers.StraightTrunkPlacer` now has an overload that takes in an `IntProvider` for the trunk width
 - `net.minecraft.world.level.levelgen.material`
-    - `FlowingFluid`
+    - `EmptyFluid` is now `protected`, taking in the `Fluid$Properties`
+    - `FlowingFluid` is now `protected`, taking in the `Fluid$Properties`
         - `FALLING` replaced by `SOURCE`, not one-to-one
         - `getFlowing` methods have been combined into a single `getFlowing` method taking in an `int` amount, returning a `FluidState`
         - `getSource` methods have been combined into a single `getSource` method that returns a `FluidState`
-    - `Fluid`
+    - `Fluid` now takes in the `Fluid$Properties`
         - `makeDefaultState` - The default state of the fluid.
         - `canBeReplacedWith` now takes in a `FluidState` instead of a `Fluid`
         - `isFalling` - Whether the fluid is currently falling (i.e., not source with the full fluid amount).
         - `isSame`, `is` are removed
+        - `getBucket` now returns a `ResourceKey` of the `Item` instead of the item itself
+        - `getFlowScale` - Returns the scalar applied to the flow rate of the fluid.
+        - `getExplosionResistance` is no longer abstract
+        - `getDrag` - Returns the drag an entity experiences when moving through the fluid.
+        - `$Properties` - The basic properties all fluids can have.
     - `FluidIds`, `Fluids#FLOWING_WATER`, `FLOWING_LAVA` are removed
     - `FluidState`
         - `isSourceOfType` now has an overload that takes in a `TagKey`
         - `isFalling` - Whether the fluid is currently falling (i.e., not source with the full fluid amount).
         - `canBeReplacedWith` now takes in a `FluidState` instead of a `Fluid`
-    - `LavaFluid` is no longer abstract
+    - `LavaFluid` is no longer abstract, now taking in the `Fluid$Properties`
         - `$Flowing`, `$Source` are removed
     - `MaterialRuleContext` constructor is now `public` from package-private, taking in the `BiomeResolver` instead of a function for the biome getter
         - `updateXZ`, `updateY` are now `public` from package-private
     - `MaterialSystem` no longer takes in the default `BlockState`
         - `topMaterial` is removed
         - `surfaceExtensions` - The extensions to the surface terrain.
-    - `WaterFluid` is no longer abstract
+    - `WaterFluid` is no longer abstract, now taking in the `Fluid$Properties`
         - `$Flowing`, `$Source` are removed
 - `net.minecraft.world.level.levelgen.placement`
     - `PlacementContext` is now a `record`, no longer extending `WorldGenerationContext`
@@ -1207,6 +1577,7 @@ The following is a non-exhaustive changelog of the differences between 26.3 to 2
     - All `RuleTest` implementations are now `record`s instead of `class`es
     - `RuleTest` is now an `interface` instead of an abstract `class`
         - `getType` replaced by `codec`, now a `MapCodec` instead of a `RuleTestType`, `public` instead of `protected`
+        - `either` is removed
     - `RuleTestType` interface is removed
         - Constants are now inlined into `RuleTestTypes#bootstrap`, use the `CODEC` fields on each test instead
         - `codec` -> `RuleTest#codec`

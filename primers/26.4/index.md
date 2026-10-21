@@ -103,6 +103,79 @@ Minecraft.getInstance().getTextureManager()
     );
 ```
 
+## Yeah, That's Definitely Renderable
+
+`GuiGraphicsExtractor` now provides access to the mouse XY coordinates along with the `DeltaTracker`. As such, `Renderable` no longer takes in these parameters, instead only providing the `GuiGraphicsExtractor`. Additionally, many GUI classes that were not previously `Renderable` now implement the interface.
+
+```java
+// In some `Renderable` subtype
+@Override
+public void extractRenderState(GuiGraphicsExtractor graphics) {
+    // The mouse coordinates.
+    int mouseX = graphics.mouseX();
+    int mouseY = graphics.mouseY();
+
+    // The partial ticks (also known as 'a').
+    float partialTick = graphics.partialTicks();
+
+    // ...
+}
+```
+
+## Dynamic Render Pipeline Construction
+
+Vanilla `RenderPipeline` creation has been reimagined into a more dynamic construction mechanism. As such, most of the existing `RenderPipeline`s are no longer constants, but rather obtained from the cache or constructed lazily using parameters combined with specific methods.
+
+The major feature this change introduces is `RenderPipelines#dynamicPipeline`, which given some parameter object, constructs the `RenderPipeline`. The constructed pipeline is then cached using its parameters and string id as the key, ready to be queried again on the same input. Note that the id in this case doesn't necessarily refer to the `RenderPipeline` identifier itself, but rather a grouping that the parameters are applied to.
+
+```java
+// A parameter object.
+public record ExampleParameters(boolean value) {}
+
+// The method used to construct the render pipeline.
+public static RenderPipeline example(ExampleParameters parameters) {
+    return RenderPipelines.dynamicPipeline(
+        // The parameters to take in, can be any object, even `null`.
+        parameters,
+        // The identifier of the pipeline group.
+        "examplemod:example",
+        // A function to construct a render pipeline from the parameters.
+        // In this example, the input would the object we passed in.
+        (ExampleParameters params) -> RenderPipeline.builder(GUI_SNIPPET)
+            .withLocation(Identifier.withNamespaceAndPath("examplemod", "example_" + Boolean.toString(params.value())))
+            .build()
+    );
+}
+```
+
+Vanilla makes use of these methods as pipeline providers, which are functions that typically take in a nullable `OitStage` (where a non-`null` value means the pipeline supports order-independent transparency), and returns a `RenderPipeline`. The pipeline return value can sometimes be nullable depending on if the implementing system validates whether the pipeline can support OIT.
+
+```java
+// An example using `SingleQuadParticle$Layer`.
+public static final SingleQuadParticle.Layer EXAMPLE_LAYER = new SingleQuadParticle.Layer(
+    false,
+    TextureAtlas.LOCATION_PARTICLES,
+    // A function that takes in the nullable `OitStage` and returns the
+    // `RenderPipeline` to use.
+    (@Nullable OitStage stage) -> stage == null
+        // Return our render pipeline if OIT isn't used since this example doesn't support it.
+        ? example(new ExampleParameters(false))
+        // Otherwise return null.
+        : null
+);
+```
+
+Vanilla does something similar with their pipelines, with both the parameter records and their accompanying methods available in `RenderPipelines` (e.g., `block` with `$BlockParameters`, `item` with `$ItemParameters`, etc.). For all of the dynamic pipelines vanilla uses, there are precompiled via `RenderPipelines#dynamicPipelinesToPrecompile`. This is handled through `RenderPipelineVariant` and their implementations, which are basically common parameter holders minus the nullable `OitStage`. Its main use is for precompilation, as otherwise its parameters could be added onto the passed parameter object instead, similar to `$SkyParameters`.
+
+```java
+// Creating a block pipeline.
+RenderPipelines.block(new RenderPipelines.BlockParameters(BlockRenderPipelineVariant.SOLID, null));
+```
+
+How the parameters translate to the previous `RenderPipeline` constants is available in the changelog.
+
+As for custom implementations of `RenderPipeline`, these systems may or may not be used. The only major difference are the `OitStage -> RenderPipeline` providers passed around and that most of the associated `RenderPipeline$Snippet`s have been inlined into the construction methods.
+
 ## Block Sound Sets
 
 `SoundType` has been replaced with `BlockSoundSet`, a world datapack registry, that provides the common interaction sounds for blocks.
@@ -160,7 +233,36 @@ Most sound fields across the various datapack registry objects have been marked 
 
 Flowing and source fluids have been combined into a single `Fluid` instance. The source and flowing state are checked via `isSource`. `FlowingFluid` differentiates source and flowing through the `BlockStateProperties#SOURCE` boolean property. `isFalling` is also added for fluids flowing downwards due to gravity, which is handled by `BlockStateProperties#LEVEL_FLOWING` if the value is 8 and the fluid is not a source.
 
-Implementation-wise, this means that the `$Flowing` and `$Source` subclasses are no longer needed, along with `FlowingFluid#getFlowing()` and `getSource()`. As each fluid now represents all possible states, tag comparison is no longer necessary and can be done directly by comparing the `Fluid`s typically using the `FluidState` pass around.
+Implementation-wise, this means that the `$Flowing` and `$Source` subclasses are no longer needed, along with `FlowingFluid#getFlowing()` and `getSource()`. As each fluid now represents all possible states, tag comparison is no longer necessary and can be done directly by comparing the `Fluid`s via the `FluidState` passed around. Additionally, `Fluid`s now take in a `Fluid$Properties`, which is responsible for setting the associated bucket item, sound event on bucket pickup, the drip particle, its explosion resistance, whether the fluid randomly ticks, and the amount of drag it puts on entities moving through.
+
+```java
+// Assume we have some `ExampleFluid` extends `FlowingFluid` with the
+// same constructor arguments.
+public static final ExampleFluid EXAMPLE_FLUID = new ExampleFluid(
+    // Construct the fluid properties
+    Fluid.Properties.of()
+        // The `ResourceKey` of the item representing the fluid in a bucket.
+        .bucketItem(ItemIds.APPLE)
+        // The `SoundEvent` to play when picked up by a bucket.
+        // If not set, no sound is played.
+        .soundEvent(SoundEvents.BUCKET_FILL)
+        // The particle that drips through other blocks when this fluid is above.
+        // If not set, there is no drip particle.
+        .dripParticle(ParticleTypes.DRIPPING_WATER)
+        // The explosion resistance of the fluid. When calculating whether the
+        // associated block breaks, it will choose the maximum resistance between
+        // the fluid and the block.
+        // Defaults to 0f.
+        .explosionResistance(100f)
+        // When set, `Fluid#randomTick` is called based on the random tick speed
+        // game rule.
+        .randomTicking()
+        // The amount of drag an entity feels when moving through the fluid. What
+        // direction that drag is felt in depends on the movement implementation.
+        // Defaults to 1f.
+        .drag(0.8f)
+);
+```
 
 ## Debug Facts
 
